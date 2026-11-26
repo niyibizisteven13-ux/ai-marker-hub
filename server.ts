@@ -2952,6 +2952,26 @@ async function startServer() {
     };
     app.get('/', (req, res, next) => (/^myseb\./i.test(req.hostname) ? void mysebShell(req, res) : next()));
     app.get(['/ms', '/ms/'], (req, res) => void mysebShell(req, res));
+    app.get('/discover', async (req, res, next) => {
+      try {
+        const { escapeMarkup: esc, publicDirectory, publicPages, renderSearchPage } = await import('./server/services/searchDiscovery.js');
+        const search = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 100) : '';
+        const after = typeof req.query.after === 'string' ? req.query.after.slice(0, 100) : '';
+        const results = await publicDirectory(search, after);
+        const links = results.entries.map(entry => `<li><a href="${esc(entry.path)}">${esc(entry.name)}</a> · ${esc(entry.kind)}</li>`).join('');
+        const nextPage = results.next ? `<p><a href="/discover?${esc(new URLSearchParams({ q: search, after: results.next }).toString())}">More results</a></p>` : '';
+        const body = `<main><h1>Discover Bwenge</h1>
+          <nav><a href="/ms">MySEB</a> · <a href="/myseb">MySEB student downloads</a> · <a href="/research">Bwenge4Research</a> · <a href="/get-app">Get the apps</a></nav>
+          <form method="get"><label>Search names, businesses and publications <input name="q" maxlength="100" value="${esc(search)}"></label> <button>Search</button></form>
+          ${links ? `<ul>${links}</ul>` : '<p>No matching public pages.</p>'}${nextPage}</main>`;
+        const html = await fs.readFile(path.join(distPath, 'index.html'), 'utf8');
+        if (search || after) res.setHeader('X-Robots-Tag', 'noindex, follow');
+        res.type('html').setHeader('Cache-Control', 'no-cache');
+        // This directory is a server-rendered page, including for browsers with JavaScript disabled.
+        res.send(renderSearchPage(html, { ...publicPages['/discover'], path: '/discover' }, body)
+          .replace(/<script\b[^>]*type="module"[^>]*><\/script>/gi, ''));
+      } catch (error) { next(error); }
+    });
     app.get(['/', '/about', '/our-story', '/get-app', '/research', '/myseb', '/terms', '/privacy'], async (req, res, next) => {
       const researchHost = /^research\.bwenge\.space$/i.test(req.hostname);
       if (req.path === '/' && !researchHost) return next();

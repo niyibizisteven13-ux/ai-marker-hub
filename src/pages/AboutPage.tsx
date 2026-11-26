@@ -84,6 +84,7 @@ export default function AboutPage() {
         <section className="max-w-3xl">
           <p className="mb-4 text-sm font-semibold uppercase tracking-[0.18em] text-teal-300">AI tools made for real work</p>
           <h1 className="text-4xl font-bold leading-tight tracking-tight sm:text-6xl">One platform for data, learning, research and business</h1>
+          <a href="/discover" className="mt-4 inline-block text-teal-200 underline underline-offset-4">Discover public businesses, profiles and research</a>
           <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-300">
             Bwenge.space brings practical AI tools together for learners, teachers, researchers, institutions and businesses in Rwanda and beyond. Explore datasets, create forms, review student work, learn new skills and build a public presence.
           </p>

@@ -35,6 +35,7 @@ export function renderSearchPage(html: string, page: { title: string; descriptio
 }
 
 export const publicPages = {
+  '/discover': { title: 'Discover Businesses, People and Research | Bwenge.space', description: 'Find public businesses, professional profiles, published research and MySEB on Bwenge.space.' },
   '/about': { title: 'About Bwenge.space', description: 'Learn about Bwenge.space and its connected tools for education, research and business.' },
   '/our-story': { title: 'Our Story | Bwenge.space', description: 'Read how Bwenge.space began and why it builds tools for education, research and business.' },
   '/myseb': { title: 'MySEB Downloads for Students | Bwenge.space', description: 'Find the MySEB student app and instructions for opening an exam link from your lecturer.' },
@@ -90,4 +91,35 @@ export async function publishedResearchSummary(id: string) {
     FROM "AppSetting" WHERE key = ${'research-published:' + id} LIMIT 1`;
   const paper = rows[0];
   return paper?.title && paper?.abstract ? { title: paper.title, authors: paper.authors ?? '', abstract: paper.abstract } : null;
+}
+
+type DirectoryRow = { key: string; slug: string | null; category: string | null; name: string | null };
+
+export async function publicDirectory(search: string, after: string) {
+  const { prisma } = await import('../db.js');
+  const rows = await prisma.$queryRaw<DirectoryRow[]>`
+    SELECT key, value->>'slug' AS slug, value->>'category' AS category,
+      COALESCE(value->>'name', value->>'title') AS name
+    FROM "AppSetting"
+    WHERE key > ${after} AND (
+      (key LIKE 'biz:%' AND value->'published' = 'true'::jsonb AND value->>'suspended' IS NULL
+        AND value->>'slug' ~ '^[a-z0-9][a-z0-9-]{0,63}$')
+      OR key ~ '^research-published:[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$'
+    )
+    AND strpos(lower(concat_ws(' ', value->>'name', value->>'slug', value->>'title', value->>'authors')), lower(${search}::text)) > 0
+    ORDER BY key LIMIT 51`;
+  const visible = rows.slice(0, 50);
+  return {
+    next: rows.length > 50 ? visible.at(-1)?.key : undefined,
+    entries: visible.flatMap(row => {
+      if (!row.name) return [];
+      if (row.slug && slugPattern.test(row.slug)) return [{
+        name: row.name,
+        kind: row.category === 'profile' ? 'Bwenge4Profile' : 'Bwenge4Biz',
+        path: (row.category === 'profile' ? '/p/' : '/b/') + row.slug,
+      }];
+      const id = row.key.slice('research-published:'.length);
+      return paperIdPattern.test(id) ? [{ name: row.name, kind: 'Bwenge4Research', path: '/research?paper=' + id }] : [];
+    }),
+  };
 }
