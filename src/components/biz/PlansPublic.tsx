@@ -41,7 +41,9 @@ export const saveUser = (slug: string, u: string) => { try { if (u) localStorage
 export const forgetUser = (slug: string) => { try { localStorage.removeItem(UKEY(slug)); } catch { /* optional */ } };
 export function clearSession(slug: string) { try { sessionStorage.removeItem(KEY(slug)); localStorage.removeItem(KEY(slug)); } catch { /* optional */ } }
 
-const field = 'mt-1 min-h-12 w-full rounded-xl border border-[#D9DEE5] bg-white px-3.5 text-base outline-none focus:border-[#0E1722]';
+const fieldBase = 'mt-1 w-full rounded-xl border border-[#D9DEE5] bg-white px-3.5 text-base outline-none focus:border-[#0E1722]';
+const field = `${fieldBase} min-h-12`;
+const mealField = `${fieldBase} min-h-11`;
 function Sheet({ label, onClose, children }: { label: string; onClose: () => void; children: React.ReactNode }) {
   useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, [onClose]);
   return <div role="dialog" aria-modal="true" aria-label={label} className="fixed inset-0 z-[300] flex items-end justify-center bg-black/50 sm:items-center" onClick={onClose}><div onClick={(e) => e.stopPropagation()} className="max-h-[92vh] w-full max-w-md space-y-3 overflow-auto rounded-t-3xl bg-white p-5 sm:rounded-3xl">{children}</div></div>;
@@ -185,7 +187,7 @@ function useMealClock(serverTime?: number, history?: CardInfo['history']) {
   return now;
 }
 
-export function PaperCard({ b, card, w }: { b: Pick<PublicBusiness, 'category' | 'theme' | 'name' | 'contact' | 'verified'>; card: CardInfo; w: ReturnType<typeof wordsOf> }) {
+export function PaperCard({ b, card, w, animateMealTicks = false }: { b: Pick<PublicBusiness, 'category' | 'theme' | 'name' | 'contact' | 'verified'>; card: CardInfo; w: ReturnType<typeof wordsOf>; animateMealTicks?: boolean }) {
   const tx = useTx(); const theme = THEMES[b.theme] ?? THEMES.gold; const cat = CATEGORIES.find((c) => c.id === b.category)?.label ?? '';
   const layout = card.program.cardLayout;
   const cal = card.calendar.filter((day) => !layout?.hiddenDates.includes(day.date));
@@ -206,6 +208,18 @@ export function PaperCard({ b, card, w }: { b: Pick<PublicBusiness, 'category' |
   const short = (s: string) => (s.length > 10 ? `${s.slice(0, 9)}…` : s);
   return (
     <div className="relative isolate overflow-hidden rounded-2xl border p-4 shadow-sm" style={{ background: paper, borderColor: line, color: ink }}>
+      {animateMealTicks && <style>{`
+        @media (prefers-reduced-motion: no-preference) {
+          .biz-meal-tick-path {
+            stroke-dasharray: 1;
+            animation: bizMealTickDraw 1.2s ease-out both;
+          }
+        }
+        @keyframes bizMealTickDraw {
+          from { stroke-dashoffset: 1; }
+          to { stroke-dashoffset: 0; }
+        }
+      `}</style>}
       <CardWatermark businessId={card.business.id} image={card.program.stampImage} />
       <span aria-hidden="true" className="absolute left-1/2 top-2 h-3 w-3 -translate-x-1/2 rounded-full border" style={{ background: '#F5F7FA', borderColor: line }} />
       <div className="mt-3 text-center">
@@ -228,9 +242,14 @@ export function PaperCard({ b, card, w }: { b: Pick<PublicBusiness, 'category' |
             {rows.map((d) => { const isToday = d.date === card.today.date; return (
               <tr key={d.date} style={isToday && !shuffle && !card.today.weekly ? { background: `color-mix(in srgb, ${theme.accent} 28%, transparent)` } : undefined}>
                 <th scope="row" className="border-b border-r px-1 py-1 text-left text-xs font-bold" style={{ borderColor: line }}><span className="text-base tabular-nums">{dayNum(d.date)}</span> <span className="font-semibold opacity-70">{tx(DAY[d.dow])}</span>{isToday && <span className="sr-only"> {tx('today')}</span>}</th>
-                {items.map((it) => { const count = d.used.filter(item => item === it).length; const used = count > 0; const latest = card.history?.filter(u => (u.cellDate ?? u.date) === d.date && u.item === it).at(-1); const at = latest?.at; const aged = guestCard && latest && now >= tickDeadline(latest); const Mark = aged ? CheckCheck : Check;
+                {items.map((it) => { const count = d.used.filter(item => item === it).length; const used = count > 0; const latest = card.history?.filter(u => (u.cellDate ?? u.date) === d.date && u.item === it).at(-1); const at = latest?.at; const aged = (guestCard || animateMealTicks) && latest && now >= tickDeadline(latest); const Mark = aged ? CheckCheck : Check;
                   return <td key={it} title={used ? `${it}${at ? ` ${clock(at)}` : ''}` : undefined} className="relative h-9 overflow-hidden border-b border-r p-0 text-lg last:border-r-0" style={{ borderColor: line, ...(!d.open ? { background: `repeating-linear-gradient(135deg, transparent 0 4px, color-mix(in srgb, ${ink} 14%, transparent) 4px 5px)` } : {}) }}>
-                    {used ? <span className="inline-flex items-center gap-1"><Mark size={20} strokeWidth={2.2} role="img" aria-label={`${it}: ${aged ? tx("Check-in timer elapsed") : tx("Checked in")}`} className="relative mx-auto" style={{ color: guestCard ? ink : '#047857' }} />{count > 1 && <b className="text-sm">×{count}</b>}</span> : !d.open ? <span className="text-xs opacity-50" aria-label={tx('Closed')}>—</span> : null}</td>; })}
+                    {used ? <span className="inline-flex items-center gap-1">{animateMealTicks && latest && !aged ? (
+                      <svg key={latest.id ?? latest.at} width={22} height={22} viewBox="0 0 52 52" fill="none" stroke="currentColor" role="img" aria-label={`${it}: ${tx("Checked in")}`} className="shrink-0" style={{ color: ink }}>
+                        <circle cx="26" cy="26" r="23" strokeWidth="3" />
+                        <path className="biz-meal-tick-path" pathLength={1} d="M14.1 27.2l7.1 7.2 16.7-16.8" strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    ) : <Mark size={animateMealTicks ? 22 : 20} strokeWidth={2.2} role="img" aria-label={`${it}: ${aged ? tx("Check-in timer elapsed") : tx("Checked in")}`} className="relative mx-auto" style={{ color: guestCard ? ink : '#047857' }} />}{count > 1 && <b className="text-sm">×{count}</b>}</span> : !d.open ? <span className="text-xs opacity-50" aria-label={tx('Closed')}>—</span> : null}</td>; })}
               </tr>); })}
           </tbody>
         </table>
@@ -372,12 +391,28 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
       window.history.replaceState({}, '', url.pathname + url.search);
     } catch { /* optional */ }
   }, [scanCode, card]); // eslint-disable-line react-hooks/exhaustive-deps
+  const restaurant = b.category === 'restaurant';
   const m = card?.member; const usedUp = !!card && m?.state === 'active' && !!card.program.totalUses && m.usedTotal >= card.program.totalUses;
   const tone = !m ? '#5B6470' : usedUp ? '#B91C1C' : m.state === 'active' ? '#15803D' : m.state === 'pending' || m.state === 'not_started' ? '#B45309' : '#B91C1C';
   const label = !m ? '' : usedUp ? t('ALL {USES} TAKEN') : ({ active: tx('ACTIVE'), pending: tx('WAITING FOR PAYMENT'), not_started: tx('STARTS SOON'), expired: tx('PLAN ENDED'), paused: tx('PAUSED'), cancelled: tx('CANCELLED') } as Record<string, string>)[m.state];
+  const showCheckin = (m?.state === 'active' && card?.tick) || confirmationCode || checkinError;
+  const purchasePanel = card && m && card.canAddCards && (m.state === 'active' || m.state === 'expired') && card.program.tariffs.length > 0 && (
+    <section className={`grid gap-2 rounded-2xl bg-white ${restaurant ? "p-3 min-[400px]:grid-cols-[minmax(0,1fr)_auto] md:grid-cols-1" : "p-4"}`}>
+      {(!restaurant || m.state === 'expired') && <p className="col-span-full font-semibold">{m.state === 'expired' ? tx('Renew this card') : tx('Add another card')}</p>}
+      <label className="block min-w-0 text-sm">{tx('Choose a duration and price')}
+        <select className={restaurant ? mealField : field} value={newCardDays ?? card.program.tariffs[0].days} onChange={(e) => setNewCardDays(Number(e.target.value))}>
+          {card.program.tariffs.map(option => <option key={option.days} value={option.days}>{option.days} {tx('days')} · {rwf(option.priceRwf)}</option>)}
+        </select>
+      </label>
+      <button type="button" disabled={addingCard || busy} onClick={() => void addCard()} style={{ background: theme.accent, color: theme.on }} className="min-h-11 w-full self-end rounded-xl px-3 text-sm font-semibold disabled:opacity-50">
+        {addingCard ? <Loader2 className="mx-auto animate-spin" size={18} /> : m.state === 'expired' ? tx('Request renewal') : tx('Add another card')}
+      </button>
+      <p className="col-span-full text-xs text-[#5B6470]">{tx('The card starts after the business confirms your payment.')}</p>
+    </section>
+  );
   return (
     <div role="dialog" aria-modal="true" aria-label={t("My {pass}")} className="fixed inset-0 z-[320] overflow-auto bg-[#F5F7FA]">
-      <div className="mx-auto max-w-md px-4 pb-10 pt-4">
+      <div className={`mx-auto pb-10 pt-4 ${restaurant ? "max-w-4xl px-3 sm:px-5" : "max-w-md px-4"}`}>
         <div className="mb-3 flex items-center justify-between gap-2"><div className="min-w-0"><p className="truncate font-display text-lg font-semibold">{b.name}{b.verified && <VerifiedBadge size={18} className="ml-1" />}</p>{me && <p className="truncate text-sm text-[#5B6470]">{tx('Hello')}, {me.name}</p>}</div>
           <div className="flex items-center gap-1"><button type="button" onClick={() => setPinOpen((v) => !v)} aria-label={tx('Change passcode')} title={tx('Change passcode')} className="rounded-full p-2 hover:bg-white"><KeyRound size={18} /></button>
             <button type="button" onClick={async () => { const s = session(); if (s) await publicApi.logout(slug, s); clearSession(slug); onSignedOut(); }} aria-label={tx('Sign out')} title={tx('Sign out')} className="rounded-full p-2 hover:bg-white"><LogOut size={18} /></button>
@@ -392,21 +427,8 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
         {flash && <p role="status" className="mb-3 flex items-center gap-2 rounded-2xl bg-emerald-50 p-4 text-base font-semibold text-emerald-800"><CheckCircle2 size={20} aria-hidden="true" />{flash}</p>}
         {card && m && (
           <div className="space-y-3">
-            <div className="rounded-full px-4 py-2 text-center text-sm font-bold tracking-wide text-white" style={{ background: tone }}>{label}</div>
-            {card.canAddCards && (m.state === 'active' || m.state === 'expired') && card.program.tariffs.length > 0 && (
-              <section className="space-y-2 rounded-2xl bg-white p-4">
-                <p className="font-semibold">{m.state === 'expired' ? tx('Renew this card') : tx('Add another card')}</p>
-                <label className="block text-sm">{tx('Choose a duration and price')}
-                  <select className={field} value={newCardDays ?? card.program.tariffs[0].days} onChange={(e) => setNewCardDays(Number(e.target.value))}>
-                    {card.program.tariffs.map(option => <option key={option.days} value={option.days}>{option.days} {tx('days')} · {rwf(option.priceRwf)}</option>)}
-                  </select>
-                </label>
-                <button type="button" disabled={addingCard || busy} onClick={() => void addCard()} style={{ background: theme.accent, color: theme.on }} className="min-h-11 w-full rounded-xl px-4 font-semibold disabled:opacity-50">
-                  {addingCard ? <Loader2 className="mx-auto animate-spin" size={18} /> : m.state === 'expired' ? tx('Request renewal') : tx('Add another card')}
-                </button>
-                <p className="text-xs text-[#5B6470]">{tx('The card starts after the business confirms your payment.')}</p>
-              </section>
-            )}
+            <div className={`rounded-full px-3 text-center text-sm font-bold tracking-wide text-white ${restaurant ? "w-fit py-1" : "py-2"}`} style={{ background: tone }}>{label}</div>
+            {!restaurant && purchasePanel}
             {card.today.receipt && receiptClock < tickDeadline(card.today.receipt) && <section aria-label={tx("Meal confirmation")} className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-950">
               <p className="flex items-center gap-2 font-semibold"><CheckCircle2 size={20} />{tx("Meal confirmed")}</p>
               <p className="mt-1 text-2xl font-bold">{card.today.receipt.item} × {card.today.receipt.count}</p>
@@ -414,63 +436,63 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
               <p className="font-mono">#{card.today.receipt.reference}</p>
               <p className="text-sm">{tx("Show this confirmation to the waiter.")}</p>
             </section>}
-            {((m.state === 'active' && card.tick) || confirmationCode || checkinError) && (
-              <div className="space-y-3 rounded-2xl bg-white p-4">
-                <p className="font-display text-lg font-semibold">{card.tick?.needsCode === false ? tx("Meal check-in") : tx("Scan the business's code")}</p>
-                {confirmationCode ? (
-                  <form className="space-y-2" onSubmit={(event) => { event.preventDefault(); if (/^\d{4,6}$/.test(scanPasscode)) void doTick(confirmationCode, scanPasscode, useCurrentCode); }}>
-                    <label className="block text-sm font-semibold">{tx("Meal box to use")}
-                      <select className={field} value={mealBox} onChange={e => setMealBox(e.target.value)}>
-                        <option value="">{tx("Current meal")}</option>
-                        {card.program.items.filter(item => isFlexibleMeal(item) || card.tick?.items.some(option => option.item === item && option.allowed)).map(item => <option key={item}>{item}</option>)}
-                      </select>
-                    </label>
-                    <label className="block text-sm font-semibold">{tx("How many meal cells do you want to tick?")}
-                      <input type="number" inputMode="numeric" required min={1} max={100} step={1} className={field} value={quantity} onChange={e => setQuantity(e.target.value)} autoFocus />
-                    </label>
-                    <p className="text-sm">{tx("Each tick uses one available day for this meal, starting today.")}</p>
-                    <div className="flex gap-2">{[1, 2, 5].map(n => <button key={n} type="button" className="rounded-xl border px-4 py-2" aria-pressed={quantity === String(n)} onClick={() => setQuantity(String(n))}>{n}</button>)}</div>
-                    <label className="block text-sm font-medium">{tx("Enter your passcode to confirm check-in")}
-                      <input className={`${field} font-mono text-xl tracking-[0.3em]`} type="password" autoComplete="current-password" inputMode="numeric" minLength={4} maxLength={6} required value={scanPasscode} onChange={(event) => setScanPasscode(event.target.value.replace(/\D/g, ''))} />
-                    </label>
-                    <div className="flex gap-2">
-                      <button type="submit" disabled={busy || scanPasscode.length < 4} style={{ background: theme.accent, color: theme.on }} className="min-h-12 flex-1 rounded-xl px-4 font-semibold disabled:opacity-50">{tx("Confirm check-in")}</button>
-                      <button type="button" disabled={busy} className="min-h-12 rounded-xl border px-4 font-semibold" onClick={() => { setConfirmationCode(''); setUseCurrentCode(false); setScanPasscode(''); setCheckinError(''); }}>{tx("Cancel")}</button>
-                    </div>
-                  </form>
-                ) : m.state === 'active' && card.tick && (
-                  <>
-                    {camera ? (
-                      <div className="relative overflow-hidden rounded-xl bg-black">
-                        <video ref={scanner.video} muted playsInline className="aspect-square w-full object-cover" aria-label={tx("Camera")} />
-                        <button type="button" className="absolute right-2 top-2 rounded-full bg-black/70 p-2 text-white" onClick={() => setCamera(false)} aria-label={tx("Close the camera")}><X size={18} /></button>
-                        {!scanner.ready && !scanner.error && <Loader2 className="absolute left-1/2 top-1/2 animate-spin text-white" aria-label={tx("Loading")} />}
+            <div className={restaurant && showCheckin && purchasePanel ? "grid items-start gap-3 md:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]" : "contents"}>
+              {showCheckin && (
+                <div className={`rounded-2xl bg-white ${restaurant ? "space-y-2 p-3" : "space-y-3 p-4"}`}>
+                  <p className={`font-display font-semibold ${restaurant ? "text-base" : "text-lg"}`}>{card.tick?.needsCode === false ? tx("Meal check-in") : tx("Scan the business's code")}</p>
+                  {confirmationCode ? (
+                    <form className="space-y-2" onSubmit={(event) => { event.preventDefault(); if (/^\d{4,6}$/.test(scanPasscode)) void doTick(confirmationCode, scanPasscode, useCurrentCode); }}>
+                      <label className="block text-sm font-semibold">{tx("Meal box to use")}
+                        <select className={field} value={mealBox} onChange={e => setMealBox(e.target.value)}>
+                          <option value="">{tx("Current meal")}</option>
+                          {card.program.items.filter(item => isFlexibleMeal(item) || card.tick?.items.some(option => option.item === item && option.allowed)).map(item => <option key={item}>{item}</option>)}
+                        </select>
+                      </label>
+                      <label className="block text-sm font-semibold">{tx("How many meal cells do you want to tick?")}
+                        <input type="number" inputMode="numeric" required min={1} max={100} step={1} className={field} value={quantity} onChange={e => setQuantity(e.target.value)} autoFocus />
+                      </label>
+                      <p className="text-sm">{tx("Each tick uses one available day for this meal, starting today.")}</p>
+                      <div className="flex gap-2">{[1, 2, 5].map(n => <button key={n} type="button" className="rounded-xl border px-4 py-2" aria-pressed={quantity === String(n)} onClick={() => setQuantity(String(n))}>{n}</button>)}</div>
+                      <label className="block text-sm font-medium">{tx("Enter your passcode to confirm check-in")}
+                        <input className={`${field} font-mono text-xl tracking-[0.3em]`} type="password" autoComplete="current-password" inputMode="numeric" minLength={4} maxLength={6} required value={scanPasscode} onChange={(event) => setScanPasscode(event.target.value.replace(/\D/g, ''))} />
+                      </label>
+                      <div className="flex gap-2">
+                        <button type="submit" disabled={busy || scanPasscode.length < 4} style={{ background: theme.accent, color: theme.on }} className="min-h-12 flex-1 rounded-xl px-4 font-semibold disabled:opacity-50">{tx("Confirm check-in")}</button>
+                        <button type="button" disabled={busy} className="min-h-12 rounded-xl border px-4 font-semibold" onClick={() => { setConfirmationCode(''); setUseCurrentCode(false); setScanPasscode(''); setCheckinError(''); }}>{tx("Cancel")}</button>
                       </div>
-                    ) : (
-                      <button type="button" disabled={busy} style={{ background: theme.accent, color: theme.on }} className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl px-4 font-semibold disabled:opacity-50" onClick={() => { setCheckinError(''); setCamera(true); }}><Camera size={19} aria-hidden="true" />{tx("Scan QR code")}</button>
-                    )}
-                    {camera && scanner.error && <p role="alert" className="text-sm text-rose-700">{scanner.error}</p>}
-                    {b.category === 'restaurant' && <div>
-                      <button type="button" disabled={busy} className="min-h-12 w-full rounded-xl border px-4 font-semibold disabled:opacity-50" onClick={() => prepareCheckin('', undefined, true)}>{tx('Use current meal code')}</button>
-                      <p className="mt-1 text-center text-xs text-[#5B6470]">{tx('The current code is applied automatically and stays hidden.')}</p>
-                    </div>}
-                    <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); if (/^\d{6}$/.test(typed)) prepareCheckin(typed); }}>
-                      <input className={`${field} !mt-0 font-mono text-xl tracking-[0.3em]`} value={typed} onChange={(event) => setTyped(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" maxLength={6} placeholder={tx("6-digit code")} aria-label={tx('Code shown at the business')} />
-                      <button type="submit" disabled={busy || typed.length !== 6} className="min-h-12 shrink-0 rounded-xl border px-4 font-semibold disabled:opacity-50">{tx('Use code')}</button>
                     </form>
-                  </>
-                )}
-                {checkinError && <p role="alert" className="text-sm text-rose-700">{checkinError}</p>}
-                {card.program.windows?.length ? <p className="text-xs text-[#5B6470]">{tx("Serving hours (Kigali)")} · {card.program.windows.map((window) => `${window.item} ${window.from}–${window.to}`).join(' · ')}</p> : null}
-                {card.tick && <div className="flex flex-wrap gap-2">{card.tick.items.map((x) => { const done = card.today.used.find((u) => u.item === x.item); return <span key={x.item} className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-semibold ${done ? 'bg-emerald-50 text-emerald-800' : 'bg-[#F2F4F7] text-[#5B6470]'}`}>{done && <CheckCircle2 size={14} aria-hidden="true" />}{x.item}{done ? ` ${clock(done.at)}` : ''}</span>; })}</div>}
-                {card.tick?.undo && <p role="status" className="flex items-center justify-between gap-2 rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-900"><span>{card.tick.undo.item} {tx('ticked')}. {tx('Wrong tap?')}</span><button type="button" disabled={busy} onClick={() => void act((s, id) => publicApi.untick(slug, s, id, card.tick!.undo!.useId))} className="min-h-9 px-2 font-semibold underline">{tx('Undo')}</button></p>}
-              </div>
-            )}
+                  ) : m.state === 'active' && card.tick && (
+                    <div className={restaurant ? "grid gap-2 min-[400px]:grid-cols-2" : "space-y-3"}>
+                      {camera ? (
+                        <div className="relative col-span-full mx-auto w-full max-w-sm overflow-hidden rounded-xl bg-black">
+                          <video ref={scanner.video} muted playsInline className="aspect-square w-full object-cover" aria-label={tx("Camera")} />
+                          <button type="button" className="absolute right-2 top-2 rounded-full bg-black/70 p-2 text-white" onClick={() => setCamera(false)} aria-label={tx("Close the camera")}><X size={18} /></button>
+                          {!scanner.ready && !scanner.error && <Loader2 className="absolute left-1/2 top-1/2 animate-spin text-white" aria-label={tx("Loading")} />}
+                        </div>
+                      ) : (
+                        <button type="button" disabled={busy} style={{ background: theme.accent, color: theme.on }} className={`flex w-full items-center justify-center gap-2 rounded-xl px-3 font-semibold disabled:opacity-50 ${restaurant ? "min-h-11 text-sm" : "min-h-12"}`} onClick={() => { setCheckinError(''); setCamera(true); }}><Camera size={19} aria-hidden="true" />{tx("Scan QR code")}</button>
+                      )}
+                      {camera && scanner.error && <p role="alert" className="col-span-full text-sm text-rose-700">{scanner.error}</p>}
+                      {restaurant && <button type="button" disabled={busy} className="min-h-11 w-full rounded-xl border border-[#D9DEE5] px-3 text-sm font-semibold disabled:opacity-50" onClick={() => prepareCheckin('', undefined, true)}>{tx('Use current meal code')}</button>}
+                      <form className="col-span-full flex gap-2" onSubmit={(event) => { event.preventDefault(); if (/^\d{6}$/.test(typed)) prepareCheckin(typed); }}>
+                        <input className={`${restaurant ? mealField : `${field} font-mono text-xl tracking-[0.3em]`} !mt-0 min-w-0`} value={typed} onChange={(event) => setTyped(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" maxLength={6} placeholder={tx("6-digit code")} aria-label={tx('Code shown at the business')} />
+                        <button type="submit" disabled={busy || typed.length !== 6} className={`shrink-0 rounded-xl border border-[#D9DEE5] px-3 font-semibold disabled:opacity-50 ${restaurant ? "min-h-11 text-sm" : "min-h-12"}`}>{tx('Use code')}</button>
+                      </form>
+                    </div>
+                  )}
+                  {checkinError && <p role="alert" className="text-sm text-rose-700">{checkinError}</p>}
+                  {card.program.windows?.length ? <p className="text-xs text-[#5B6470]">{tx("Serving hours (Kigali)")} · {card.program.windows.map((window) => `${window.item} ${window.from}–${window.to}`).join(' · ')}</p> : null}
+                  {card.tick && <div className="flex flex-wrap gap-2">{card.tick.items.map((x) => { const done = card.today.used.find((u) => u.item === x.item); return <span key={x.item} className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${done ? 'bg-emerald-50 text-emerald-800' : 'bg-[#F2F4F7] text-[#5B6470]'}`}>{done && <CheckCircle2 size={14} aria-hidden="true" />}{x.item}{done && <span className="tabular-nums opacity-80">· {clock(done.at)}</span>}</span>; })}</div>}
+                  {card.tick?.undo && <p role="status" className="flex items-center justify-between gap-2 rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-900"><span>{card.tick.undo.item} {tx('ticked')}. {tx('Wrong tap?')}</span><button type="button" disabled={busy} onClick={() => void act((s, id) => publicApi.untick(slug, s, id, card.tick!.undo!.useId))} className="min-h-9 px-2 font-semibold underline">{tx('Undo')}</button></p>}
+                </div>
+              )}
+              {restaurant && purchasePanel}
+            </div>
             {card.today.weekly && <p className="rounded-xl bg-white px-3 py-2 text-sm">{card.today.checkedMeal ? `${card.today.checkedMeal.item} · ${tx('Checked in')} · ${card.today.date}` : tx('The meal color appears after a confirmed check-in during serving hours.')}</p>}
             {!!card.history?.length && <details className="rounded-xl bg-white p-3 text-sm"><summary>{tx("Individual report")} · {card.history.length} {tx("check-ins")}</summary>
               <ul className="max-h-52 overflow-auto">{card.history.slice().reverse().map(u => <li key={u.id ?? u.at + u.item}>{u.date} · {clock(u.at)} · {u.item}{u.guest && ` · ${tx('Guest')}`}</li>)}</ul>
             </details>}
-            <PaperCard key={card.cardId} b={b} card={card} w={w} />
+            <PaperCard key={card.cardId} b={b} card={card} w={w} animateMealTicks={restaurant} />
             {(m.state === 'active' || m.state === 'not_started') && card.qr && (
               <div className="rounded-2xl bg-white p-4 text-center">
                 <button type="button" onClick={() => setBig(true)} aria-label={tx('Tap to enlarge')} className="mx-auto block"><Qr text={card.qr} size={168} /></button>
