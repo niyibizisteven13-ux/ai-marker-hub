@@ -17,13 +17,15 @@ test('cache shares concurrent fills and retries a failure only on a new request'
 });
 
 test('an invalidated in-flight fill cannot overwrite a newer fill', async () => {
-  const old = Promise.withResolvers<number>();
-  const started = Promise.withResolvers<void>();
-  const first = cached('test:invalidate', 30_000, () => { started.resolve(); return old.promise; });
-  await started.promise;
+  let finishOld!: (value: number) => void;
+  let markStarted!: () => void;
+  const old = new Promise<number>(resolve => { finishOld = resolve; });
+  const started = new Promise<void>(resolve => { markStarted = resolve; });
+  const first = cached('test:invalidate', 30_000, () => { markStarted(); return old; });
+  await started;
   await invalidate('test:invalidate');
   assert.equal(await cached('test:invalidate', 30_000, async () => 2), 2);
-  old.resolve(1);
+  finishOld(1);
   assert.equal(await first, 1);
   assert.equal(await cached('test:invalidate', 30_000, async () => 3), 2);
 });
