@@ -6,7 +6,7 @@ The landing page's QR code ("Scan to get the app") and **Download the app** butt
 ## Two different apps
 * **Bwenge** is an **installable web app** (PWA): **Install Bwenge** in one tap on Android, Windows, Mac and Linux (Chrome or Edge); on iPhone, Safari → Share →
   Add to Home Screen. It opens like an app, and it **updates itself every time it opens**, so there is no installer to keep current.
-  Files: `public/manifest.webmanifest`, PNG icons `public/icons-*.png`, `public/sw.js` (installable only: it caches nothing), registered in `src/main.tsx`.
+  Files: `public/manifest.webmanifest`, PNG icons `public/icons-*.png`, `public/sw.js` (bounded offline caching for visited public business pages, home, Research and downloads, plus versioned assets), registered in `src/main.tsx`.
 * **MySEB** (the student exam app) has real installers (Windows .exe, Android .apk, Linux .AppImage, Mac .dmg) from `/myseb/download`. The page puts
   the one for the device first. There is no iPhone/iPad MySEB app.
 

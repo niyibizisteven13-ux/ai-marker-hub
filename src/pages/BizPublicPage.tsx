@@ -41,8 +41,9 @@ export default function BizPublicPage({ slug }: { slug: string }) {
       document.removeEventListener('visibilitychange', refreshBadge);
     };
   }, [slug]);
+  const loadedSlug = typeof state === 'string' ? undefined : state.business.slug;
   useEffect(() => {
-    if (typeof state === 'string' || !('serviceWorker' in navigator)) return;
+    if (!loadedSlug || !('serviceWorker' in navigator)) return;
     let alive = true;
     void navigator.serviceWorker.ready.then(registration => {
       if (!alive || !navigator.onLine) return;
@@ -51,7 +52,7 @@ export default function BizPublicPage({ slug }: { slug: string }) {
       registration.active?.postMessage({ type: 'WARM_BIZ_OFFLINE', assets: [...new Set(assets)] });
     });
     return () => { alive = false; };
-  }, [state]);
+  }, [loadedSlug]);
 
   // The business's own installable app: while its page is open, the browser sees this business's manifest, colour and name.
   useEffect(() => {
