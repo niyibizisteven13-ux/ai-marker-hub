@@ -7,7 +7,7 @@ import { isMySebHost, renderMySebShell } from '../server/services/mysebShell.js'
 test('the MySEB page shell carries MySEB’s own identity and drops Bwenge’s', () => {
   const html = '<html><head><title>Bwenge</title><meta name="description" content="Bwenge"><link rel="manifest" href="/manifest.webmanifest"><meta name="theme-color" content="#060B12"><link rel="icon" href="/favicon.svg"></head><body></body></html>';
   const out = renderMySebShell(html, 'https://www.bwenge.space/');
-  assert.match(out, /<title>MySEB: secure exams for lecturers<\/title>/); assert.match(out, /rel="manifest" href="\/myseb\.webmanifest"/); assert.match(out, /theme-color" content="#0A1424"/);
+  assert.match(out, /<title>MySEB Secure Exam Browser \| Live Rooms for Lecturers<\/title>/); assert.match(out, /rel="manifest" href="\/myseb\.webmanifest"/); assert.match(out, /theme-color" content="#0A1424"/);
   assert.match(out, /apple-mobile-web-app-title" content="MySEB"/); assert.match(out, /canonical" href="https:\/\/www\.bwenge\.space\/ms"/); assert.match(out, /og:image" content="https:\/\/www\.bwenge\.space\/myseb\/icon-512\.png"/);
   for (const gone of ['/manifest.webmanifest', '#060B12', 'href="/favicon.svg"', '<title>Bwenge</title>']) assert.ok(!out.includes(gone), gone);
   assert.equal((out.match(/rel="manifest"/g) ?? []).length, 1); assert.equal((out.match(/name="theme-color"/g) ?? []).length, 1);
