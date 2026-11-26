@@ -1,3 +1,6 @@
+import sharp from 'sharp';
+import { stat } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { Router, type Request, type Response } from 'express';
 import multer from 'multer';
 import { requireAuth } from '../../production/auth.js';
@@ -36,6 +39,12 @@ function fail(res: Response, e: unknown) {
   logger.error('[biz] failed', { errorType: (e as Error)?.name });
   return res.status(500).json({ error: 'Something went wrong. Please try again.' });
 }
+function initialsIcon(b: { name: string; theme: string }) {
+  const t = THEMES_FOR_ICON[b.theme] ?? { accent: '#0E1722', on: '#FFFFFF' };
+  const ini = b.name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase().replace(/[<>&"']/g, '');
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" fill="${t.accent}"/><text x="256" y="300" font-family="Arial,Helvetica,sans-serif" font-size="210" font-weight="700" text-anchor="middle" fill="${t.on}">${ini || 'B'}</text></svg>`;
+}
+
 const run = (fn: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response) => { fn(req, res).catch((e) => fail(res, e)); };
 
 /** Short-lived signed links so the studio can show an unpublished page's photos and videos (an image tag cannot send a sign-in header). */
@@ -100,13 +109,42 @@ export function createBizRouter(): Router {
     const b = await svc().publicBySlug(req.params.slug); if (!b) return res.status(404).end(); const slug = encodeURIComponent(b.slug);
     res.type('application/manifest+json').setHeader('Cache-Control', 'public, max-age=600');
     res.json({ name: b.name, short_name: b.name.slice(0, 12), description: b.tagline || undefined, id: `/b/${slug}`, start_url: `/b/${slug}?source=app`, scope: `/b/${slug}`, display: 'standalone', orientation: 'portrait',
-      background_color: '#FFFFFF', theme_color: THEME_COLOR[b.theme] ?? '#0E1722', icons: [{ src: `/api/biz/public/${slug}/icon.svg`, sizes: 'any', type: 'image/svg+xml', purpose: 'any maskable' }] });
+      background_color: '#FFFFFF', theme_color: THEME_COLOR[b.theme] ?? '#0E1722', icons: [192, 512].map(size => ({ src: `/api/biz/public/${slug}/icon-${size}.png${b.logo ? `?v=${encodeURIComponent(b.logo.id)}` : ''}`, sizes: `${size}x${size}`, type: 'image/png', purpose: 'any' })) });
+  }));
+  r.get(['/public/:slug/icon-192.png', '/public/:slug/icon-512.png'], bizMediaLimiter, run(async (req, res) => {
+    const b = await svc().publicBySlug(req.params.slug);
+    if (!b) return res.status(404).end();
+    const size = req.path.endsWith('icon-192.png') ? 192 : 512;
+    const logo = b.logo?.kind === 'image' ? await svc().mediaFor(b.slug, b.logo.id) : null;
+    let png: Buffer | undefined;
+    if (logo && logo.size <= MAX_IMAGE_BYTES) {
+      try {
+        const { stream } = await logo.open();
+        const parts: Buffer[] = [];
+        for await (const chunk of stream) parts.push(Buffer.from(chunk));
+        png = await sharp(Buffer.concat(parts), { limitInputPixels: 25_000_000 })
+          .rotate().resize(size, size, { fit: 'contain', background: '#FFFFFF' }).png().toBuffer();
+      } catch { /* An unreadable image uses the business initials. */ }
+    }
+    png ??= await sharp(Buffer.from(initialsIcon(b))).resize(size, size).png().toBuffer();
+    res.type('png').setHeader('Cache-Control', 'public, max-age=600');
+    res.send(png);
+  }));
+  r.get('/public/:slug/android.apk', run(async (req, res) => {
+    const directory = process.env.BWENGE_BIZ_APK_DIR;
+    const b = directory ? await svc().publicBySlug(req.params.slug) : null;
+    if (!directory || !b || !/^[a-z0-9][a-z0-9-]*$/.test(b.slug)) return res.status(404).end();
+    const filename = resolve(directory, b.slug + '.apk');
+    const file = await stat(filename).catch(() => null);
+    if (!file?.isFile()) return res.status(404).end();
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.type('application/vnd.android.package-archive');
+    res.download(filename, b.slug + '.apk');
   }));
   r.get('/public/:slug/icon.svg', run(async (req, res) => {
     const b = await svc().publicBySlug(req.params.slug); if (!b) return res.status(404).end();
-    const t = THEMES_FOR_ICON[b.theme] ?? { accent: '#0E1722', on: '#FFFFFF' }; const ini = b.name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase().replace(/[<>&"']/g, '');
     res.type('image/svg+xml').setHeader('Cache-Control', 'public, max-age=3600');
-    res.send(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" fill="${t.accent}"/><text x="256" y="300" font-family="Arial,Helvetica,sans-serif" font-size="210" font-weight="700" text-anchor="middle" fill="${t.on}">${ini || 'B'}</text></svg>`);
+    res.send(initialsIcon(b));
   }));
   r.get('/public/:slug/posts', run(async (req, res) => { res.setHeader('Cache-Control', 'private, no-cache'); res.json({ posts: await svc().publicPosts(req.params.slug, { limit: Number(req.query.limit) || 20, postId: typeof req.query.post === 'string' ? req.query.post : undefined, visitor: who(req) }) }); }));
   r.post('/public/:slug/posts/:pid/like', run(async (req, res) => res.json(await svc().like(req.params.slug, req.params.pid, who(req)))));

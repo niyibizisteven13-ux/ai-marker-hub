@@ -44,6 +44,7 @@ export default function BizPublicPage({ slug }: { slug: string }) {
     const swap = (sel: string, make: () => HTMLElement, attr: string, value: string) => { let el = document.head.querySelector(sel); if (!el) { el = make(); document.head.appendChild(el); prev.push([el, '']); } else prev.push([el, el.getAttribute(attr) ?? '']); el.setAttribute(attr, value); };
     swap('link[rel="manifest"]', () => Object.assign(document.createElement('link'), { rel: 'manifest' }), 'href', `/api/biz/public/${encodeURIComponent(b.slug)}/manifest.webmanifest`);
     swap('meta[name="theme-color"]', () => Object.assign(document.createElement('meta'), { name: 'theme-color' }), 'content', THEMES[b.theme]?.accent ?? '#0E1722');
+    swap('link[rel="apple-touch-icon"]', () => Object.assign(document.createElement('link'), { rel: 'apple-touch-icon' }), 'href', `/api/biz/public/${encodeURIComponent(b.slug)}/icon-192.png${b.logo ? `?v=${encodeURIComponent(b.logo.id)}` : ''}`);
     const attrs = ['href', 'content'];
     return () => { for (const [el, v] of prev) { const a = attrs.find((x) => el.hasAttribute(x))!; if (v) el.setAttribute(a, v); else el.remove(); } };
   }, [state]);
