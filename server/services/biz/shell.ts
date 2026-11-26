@@ -1,4 +1,5 @@
 import type { PublicBusiness } from './model.js';
+import { profileSearch } from './profileSearch.js';
 import { clearPageMetadata, escapeMarkup as esc } from '../searchDiscovery.js';
 
 /**
@@ -10,20 +11,21 @@ export const CATEGORY_WORD: Record<string, string> = { shop: 'Shop', restaurant:
 export const THEME_COLOR: Record<string, string> = { gold: '#E9A23B', teal: '#0F9D8F', green: '#1E9E5A', blue: '#2F6FED', rose: '#DB4F8E', violet: '#7C5CF0', ink: '#0E1722' };
 
 export function renderShell(html: string, b: PublicBusiness, origin: string): string {
-  const base = origin.replace(/\/$/, ''); const isProfile = b.category === 'profile'; const isFounderProfile = isProfile && b.slug.toLowerCase() === 'niyibizisteven'; const url = `${base}/${isProfile ? 'p' : 'b'}/${encodeURIComponent(b.slug)}`;
-  const title = isFounderProfile ? `${b.name} · Founder of Bwenge.space · Bwenge4Profile` : isProfile ? `${b.name}${b.profile?.headline ? ` · ${b.profile.headline}` : ''} · Bwenge4profile` : `${b.name} · ${CATEGORY_WORD[b.category] ?? 'Business'} on Bwenge`;
-  const desc = (isFounderProfile ? 'Niyibizi Steven founded Bwenge.space while studying Economics at the University of Rwanda in Huye and Data Science elsewhere. He used AI in a Google Forms test, saw it was unfair, and developed MySEB.' : isProfile ? (b.profile?.headline || b.tagline || b.about || `${b.name} on Bwenge4profile`) : (b.tagline || b.about || `${b.name} on Bwenge4biz`)).replace(/\s+/g, ' ').slice(0, 200);
-  const img = [b.cover, b.logo].find((m) => m && m.kind === 'image');
+  const base = origin.replace(/\/$/, ''); const isProfile = b.category === 'profile';; const url = `${base}/${isProfile ? 'p' : 'b'}/${encodeURIComponent(b.slug)}`;
+  const profile = isProfile ? profileSearch(b) : null;
+  const title = profile?.title ?? `${b.name} · ${CATEGORY_WORD[b.category] ?? 'Business'} on Bwenge`;
+  const desc = profile?.description ?? (b.tagline || b.about || `${b.name} on Bwenge4Biz`).replace(/\s+/g, ' ').slice(0, 200);
+  const img = (isProfile ? [b.logo, b.cover] : [b.cover, b.logo]).find((m) => m && m.kind === 'image');
   const image = img ? `${base}/api/biz/public/${encodeURIComponent(b.slug)}/media/${encodeURIComponent(img.id)}` : `${base}/icons-512.png`;
   const entity = { name: b.name, url, ...(img ? { image } : {}),
     ...(b.about ? { description: b.about } : {}) };
   const data = isProfile
-    ? { '@context': 'https://schema.org', '@type': 'ProfilePage', url, mainEntity: { '@type': 'Person', ...entity } }
+    ? { '@context': 'https://schema.org', '@type': 'ProfilePage', url, mainEntity: { '@type': 'Person', ...entity, alternateName: b.slug, description: desc } }
     : { '@context': 'https://schema.org', '@type': b.category === 'restaurant' ? 'Restaurant' : 'Organization', ...entity };
   const structured = JSON.stringify(data).replace(/</g, '\\u003c');
   const tags = [
     `<title>${esc(title)}</title>`, `<meta name="description" content="${esc(desc)}" />`, `<link rel="canonical" href="${esc(url)}" />`,
-    `<meta property="og:type" content="${isProfile ? 'profile' : 'website'}" />`, `<meta property="og:site_name" content="${isProfile ? 'Bwenge4profile' : 'Bwenge4biz'}" />`, `<meta property="og:title" content="${esc(isProfile ? title.replace(/ · Bwenge4profile$/, '') : b.name)}" />`,
+    `<meta property="og:type" content="${isProfile ? 'profile' : 'website'}" />`, `<meta property="og:site_name" content="${isProfile ? 'Bwenge4Profile' : 'Bwenge4Biz'}" />`, `<meta property="og:title" content="${esc(profile?.title ?? b.name)}" />`,
     `<meta property="og:description" content="${esc(desc)}" />`, `<meta property="og:url" content="${esc(url)}" />`, `<meta property="og:image" content="${esc(image)}" />`,
     `<meta name="twitter:card" content="summary_large_image" />`,
     `<script type="application/ld+json">${structured}</script>`,
@@ -36,8 +38,9 @@ export function renderShell(html: string, b: PublicBusiness, origin: string): st
   const shell = out.replace('</head>', () => `    ${tags}\n    ${own}\n  </head>`);
   // Public text also appears in the React page. It is available immediately to clients without JavaScript.
   const about = b.about ? `<p>${esc(b.about)}</p>` : '';
-  const headline = isProfile ? b.profile?.headline || b.tagline : b.tagline;
+  const headline = profile?.headline ?? b.tagline;
   const tagline = headline ? `<p>${esc(headline)}</p>` : '';
-  const preview = `<main><h1>${esc(b.name)}</h1>${tagline}${about}</main>`;
+  const details = profile?.details.length ? `<p>${esc(profile.details.join(' · '))}</p>` : '';
+  const preview = `<main><h1>${esc(b.name)}</h1>${tagline}${about}${details}</main>`;
   return shell.replace('<div id="root"></div>', () => `<div id="root">${preview}</div>`);
 }

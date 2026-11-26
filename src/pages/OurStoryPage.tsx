@@ -18,7 +18,7 @@ export default function OurStoryPage() {
           <header className="border-b border-white/10 pb-10">
             <h1 className="font-display text-4xl font-bold tracking-tight sm:text-6xl">Our story</h1>
             <p className="mt-5 max-w-2xl text-lg leading-8 text-slate-300">
-              Bwenge began in Huye, Rwanda, with a question from founder Niyibizi Steven. Could AI help lecturers spend less time marking papers?
+              Bwenge began in Huye, Rwanda, with a question from founder <a href="/p/niyibizisteven" className="underline underline-offset-4">Niyibizi Steven</a>. Could AI help lecturers spend less time marking papers?
             </p>
           </header>
           <div className="mt-10 max-w-3xl space-y-10 text-base leading-8 text-slate-300 [&_h2]:mb-3 [&_h2]:font-display [&_h2]:text-2xl [&_h2]:font-semibold [&_h2]:text-white [&_p+p]:mt-4">
