@@ -138,11 +138,11 @@ export function JoinFlow({ b, lang, program, onClose, onDone, renewing = false }
 }
 
 /* ---- coming back: phone number and passcode ---- */
-export function SignIn({ b, lang, onClose, onDone }: { b: PublicBusiness; lang: Lang; onClose: () => void; onDone: (passcode: string) => void }) {
+export function SignIn({ b, lang, onClose, onDone, app = false }: { b: PublicBusiness; lang: Lang; onClose: () => void; onDone: (passcode: string) => void; app?: boolean }) {
   const { tx, t } = useWords(b, lang); const theme = THEMES[b.theme] ?? THEMES.gold; const [known, setKnown] = useState(() => loadUser(b.slug)); const [f, setF] = useState({ who: '', pin: '', remember: true }); const [busy, setBusy] = useState(false); const [err, setErr] = useState('');
   const go = async (e: React.FormEvent) => { e.preventDefault(); setBusy(true); setErr(''); try { const who = (known || f.who).trim(); const byName = /[a-z]/i.test(who); const r = await publicApi.login(b.slug, byName ? { username: who, passcode: f.pin, remember: f.remember } : { phone: who, passcode: f.pin, remember: f.remember }); saveSession(b.slug, r.session, r.expiresAt, f.remember); saveUser(b.slug, r.username); onDone(f.pin); } catch (x) { setErr(x instanceof Error ? x.message : tx('Something went wrong. Please try again.')); } finally { setBusy(false); } };
-  return (
-    <Sheet label={t("Sign in to your {pass}")} onClose={onClose}>
+  const content = <>
+      {app && <div className="mb-5 flex items-center gap-3"><img src={`/api/biz/public/${encodeURIComponent(b.slug)}/icon-192.png`} alt="" width={48} height={48} className="rounded-xl" /><h1 className="font-display text-xl font-semibold">{b.name}</h1></div>}
       <div className="flex items-start justify-between gap-3"><h2 className="font-display text-xl font-semibold">{t("Sign in to your {pass}")}</h2><button type="button" onClick={onClose} aria-label={tx("Close")} className="rounded-full p-2 hover:bg-[#F2F4F7]"><X size={18} /></button></div>
       <form onSubmit={go} className="space-y-3">
         {known
@@ -154,8 +154,10 @@ export function SignIn({ b, lang, onClose, onDone }: { b: PublicBusiness; lang: 
         <button type="submit" disabled={busy} style={{ background: theme.accent, color: theme.on }} className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl text-base font-semibold disabled:opacity-60">{busy ? <Loader2 className="animate-spin" size={18} /> : <KeyRound size={18} />}{tx("Sign in")}</button>
         <p className="text-center text-xs text-[#5B6470]">{tx("Forgot your passcode? Ask the business to reset it.")}</p>
       </form>
-    </Sheet>
-  );
+  </>;
+  const label = t("Sign in to your {pass}");
+  return app ? <main className="fixed inset-0 z-[300] overflow-auto bg-[#F5F7FA] px-4 py-8"><section aria-label={label} className="mx-auto max-w-md space-y-3 rounded-2xl bg-white p-5 shadow-sm">{content}</section></main>
+    : <Sheet label={label} onClose={onClose}>{content}</Sheet>;
 }
 
 /* ---- the card, laid out like the paper one ---- */
@@ -187,6 +189,25 @@ function useMealClock(serverTime?: number, history?: CardInfo['history']) {
   return now;
 }
 
+const mealTickStyle = <style>{`
+        @media (prefers-reduced-motion: no-preference) {
+          .biz-meal-tick-path {
+            stroke-dasharray: 1;
+            animation: bizMealTickDraw 1.2s ease-out both;
+          }
+        }
+        @keyframes bizMealTickDraw {
+          from { stroke-dashoffset: 1; }
+          to { stroke-dashoffset: 0; }
+        }
+      `}</style>;
+function PendingMealTick({ label, color }: { label: string; color?: string }) {
+  return <svg width={22} height={22} viewBox="0 0 52 52" fill="none" stroke="currentColor" role="img" aria-label={label} className="shrink-0" style={{ color }}>
+                        <circle cx="26" cy="26" r="23" strokeWidth="3" />
+                        <path className="biz-meal-tick-path" pathLength={1} d="M14.1 27.2l7.1 7.2 16.7-16.8" strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>;
+}
+
 export function PaperCard({ b, card, w, animateMealTicks = false }: { b: Pick<PublicBusiness, 'category' | 'theme' | 'name' | 'contact' | 'verified'>; card: CardInfo; w: ReturnType<typeof wordsOf>; animateMealTicks?: boolean }) {
   const tx = useTx(); const theme = THEMES[b.theme] ?? THEMES.gold; const cat = CATEGORIES.find((c) => c.id === b.category)?.label ?? '';
   const layout = card.program.cardLayout;
@@ -208,18 +229,7 @@ export function PaperCard({ b, card, w, animateMealTicks = false }: { b: Pick<Pu
   const short = (s: string) => (s.length > 10 ? `${s.slice(0, 9)}…` : s);
   return (
     <div className="relative isolate overflow-hidden rounded-2xl border p-4 shadow-sm" style={{ background: paper, borderColor: line, color: ink }}>
-      {animateMealTicks && <style>{`
-        @media (prefers-reduced-motion: no-preference) {
-          .biz-meal-tick-path {
-            stroke-dasharray: 1;
-            animation: bizMealTickDraw 1.2s ease-out both;
-          }
-        }
-        @keyframes bizMealTickDraw {
-          from { stroke-dashoffset: 1; }
-          to { stroke-dashoffset: 0; }
-        }
-      `}</style>}
+      {animateMealTicks && mealTickStyle}
       <CardWatermark businessId={card.business.id} image={card.program.stampImage} />
       <span aria-hidden="true" className="absolute left-1/2 top-2 h-3 w-3 -translate-x-1/2 rounded-full border" style={{ background: '#F5F7FA', borderColor: line }} />
       <div className="mt-3 text-center">
@@ -245,10 +255,7 @@ export function PaperCard({ b, card, w, animateMealTicks = false }: { b: Pick<Pu
                 {items.map((it) => { const count = d.used.filter(item => item === it).length; const used = count > 0; const latest = card.history?.filter(u => (u.cellDate ?? u.date) === d.date && u.item === it).at(-1); const at = latest?.at; const aged = (guestCard || animateMealTicks) && latest && now >= tickDeadline(latest); const Mark = aged ? CheckCheck : Check;
                   return <td key={it} title={used ? `${it}${at ? ` ${clock(at)}` : ''}` : undefined} className="relative h-9 overflow-hidden border-b border-r p-0 text-lg last:border-r-0" style={{ borderColor: line, ...(!d.open ? { background: `repeating-linear-gradient(135deg, transparent 0 4px, color-mix(in srgb, ${ink} 14%, transparent) 4px 5px)` } : {}) }}>
                     {used ? <span className="inline-flex items-center gap-1">{animateMealTicks && latest && !aged ? (
-                      <svg key={latest.id ?? latest.at} width={22} height={22} viewBox="0 0 52 52" fill="none" stroke="currentColor" role="img" aria-label={`${it}: ${tx("Checked in")}`} className="shrink-0" style={{ color: ink }}>
-                        <circle cx="26" cy="26" r="23" strokeWidth="3" />
-                        <path className="biz-meal-tick-path" pathLength={1} d="M14.1 27.2l7.1 7.2 16.7-16.8" strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round" />
-                      </svg>
+                      <PendingMealTick key={latest.id ?? latest.at} label={`${it}: ${tx("Checked in")}`} color={ink} />
                     ) : <Mark size={animateMealTicks ? 22 : 20} strokeWidth={2.2} role="img" aria-label={`${it}: ${aged ? tx("Check-in timer elapsed") : tx("Checked in")}`} className="relative mx-auto" style={{ color: guestCard ? ink : '#047857' }} />}{count > 1 && <b className="text-sm">×{count}</b>}</span> : !d.open ? <span className="text-xs opacity-50" aria-label={tx('Closed')}>—</span> : null}</td>; })}
               </tr>); })}
           </tbody>
@@ -279,6 +286,8 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
   const { tx, t, w } = useWords(b, lang); const theme = THEMES[b.theme] ?? THEMES.gold; const slug = b.slug;
   const [me, setMe] = useState<MeInfo | null>(null); const [card, setCard] = useState<CardInfo | null>(null); const [sel, setSel] = useState<string | undefined>(initialCard); const [err, setErr] = useState('');
   const [phone, setPhone] = useState(''); const [ref, setRef] = useState(''); const [busy, setBusy] = useState(false); const [big, setBig] = useState(false); const [pinOpen, setPinOpen] = useState(false); const [pins, setPins] = useState({ cur: '', next: '' }); const [pinMsg, setPinMsg] = useState('');
+  const [tab, setTab] = useState<'today' | 'card' | 'manage'>('today');
+  const [manualCode, setManualCode] = useState(false);
   const [newCardDays, setNewCardDays] = useState<number>(); const [addingCard, setAddingCard] = useState(false);
   const waiting = useRef(false); const session = () => loadSession(slug);
   const [typed, setTyped] = useState(''); const [flash, setFlash] = useState('');
@@ -317,10 +326,11 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
   }, [slug, b.category, card?.cardId, card?.member.state, card?.version]);
   const act = async (fn: (s: string, id: string) => Promise<unknown>) => { const s = session(); if (!s || !card) return; setBusy(true); setErr(''); try { await fn(s, card.cardId); await load(); } catch (e) { fail(e); } finally { setBusy(false); } };
   const addCard = async () => {
-    const s = session(); if (!s || !card?.programId || newCardDays === undefined) return;
+    const s = session(); const days = newCardDays ?? card?.program.tariffs[0]?.days;
+    if (!s || !card?.programId || days === undefined) return;
     setAddingCard(true); setErr('');
     try {
-      const { cardId } = await publicApi.addCard(slug, s, card.programId, newCardDays);
+      const { cardId } = await publicApi.addCard(slug, s, card.programId, days);
       setSel(cardId); setNewCardDays(undefined);
       const [nextMe, nextCard] = await Promise.all([publicApi.me(slug, s), publicApi.card(slug, s, cardId)]);
       setMe(nextMe); setCard(nextCard); setFlash(tx('Card added. Complete payment to activate it.'));
@@ -412,7 +422,10 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
   );
   return (
     <div role="dialog" aria-modal="true" aria-label={t("My {pass}")} className="fixed inset-0 z-[320] overflow-auto bg-[#F5F7FA]">
-      <div className={`mx-auto pb-10 pt-4 ${restaurant ? "max-w-4xl px-3 sm:px-5" : "max-w-md px-4"}`}>
+      <div className={`mx-auto pt-4 ${restaurant ? "max-w-4xl px-3 pb-20 sm:px-5 md:pb-10" : "max-w-md px-4"}`}>
+        {restaurant && card && <nav aria-label={tx('Meal card sections')} className="fixed inset-x-0 bottom-0 z-10 grid grid-cols-3 border-t border-slate-200 bg-white pb-[env(safe-area-inset-bottom)] md:hidden">
+          {([['today', 'Today'], ['card', 'My card'], ['manage', 'Manage']] as const).map(([id, label]) => <button key={id} type="button" aria-current={tab === id ? 'page' : undefined} className={`min-h-12 text-sm font-semibold ${tab === id ? 'border-t-2 border-current text-slate-950' : 'text-slate-600'}`} onClick={() => { if (id !== 'today') setCamera(false); setTab(id); }}>{tx(label)}</button>)}
+        </nav>}
         <div className="mb-3 flex items-center justify-between gap-2"><div className="min-w-0"><p className="truncate font-display text-lg font-semibold">{b.name}{b.verified && <VerifiedBadge size={18} className="ml-1" />}</p>{me && <p className="truncate text-sm text-[#5B6470]">{tx('Hello')}, {me.name}</p>}</div>
           <div className="flex items-center gap-1"><button type="button" onClick={() => setPinOpen((v) => !v)} aria-label={tx('Change passcode')} title={tx('Change passcode')} className="rounded-full p-2 hover:bg-white"><KeyRound size={18} /></button>
             <button type="button" onClick={async () => { const s = session(); if (s) await publicApi.logout(slug, s); clearSession(slug); onSignedOut(); }} aria-label={tx('Sign out')} title={tx('Sign out')} className="rounded-full p-2 hover:bg-white"><LogOut size={18} /></button>
@@ -428,7 +441,24 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
         {card && m && (
           <div className="space-y-3">
             <div className={`rounded-full px-3 text-center text-sm font-bold tracking-wide text-white ${restaurant ? "w-fit py-1" : "py-2"}`} style={{ background: tone }}>{label}</div>
+            {restaurant && tab === 'today' && <section className="space-y-2 rounded-2xl border border-slate-200 bg-white p-3 md:hidden">
+              {mealTickStyle}
+              <h2 className="font-display font-semibold">{tx('Today')}</h2>
+              <div className="grid grid-cols-2 gap-2">
+                {card.program.items.map(item => {
+                  const use = card.today.used.filter(entry => entry.item === item).at(-1);
+                  const record = use && card.history?.filter(entry => entry.at === use.at && entry.item === item).at(-1);
+                  const aged = use && receiptClock >= tickDeadline(record ?? use);
+                  return <div key={item} className={`flex min-w-0 items-center justify-between gap-1 rounded-xl px-2.5 py-2 ${use ? 'bg-emerald-50 text-emerald-900' : 'bg-slate-50 text-slate-700'}`}>
+                    <span className="min-w-0 break-words text-sm font-semibold">{item}<span className="block text-xs font-normal">{use ? clock(use.at) : tx('Not used yet today')}</span></span>
+                    {use && (aged ? <CheckCheck size={22} className="shrink-0" role="img" aria-label={tx('Check-in timer elapsed')} /> : <PendingMealTick key={use.at} label={tx('Checked in')} />)}
+                  </div>;
+                })}
+              </div>
+            </section>}
             {!restaurant && purchasePanel}
+            {restaurant && tab === 'manage' && purchasePanel && <div className="md:hidden">{purchasePanel}</div>}
+            <div className={restaurant && tab !== 'today' ? 'hidden space-y-3 md:block' : 'space-y-3'}>
             {card.today.receipt && receiptClock < tickDeadline(card.today.receipt) && <section aria-label={tx("Meal confirmation")} className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-950">
               <p className="flex items-center gap-2 font-semibold"><CheckCircle2 size={20} />{tx("Meal confirmed")}</p>
               <p className="mt-1 text-2xl font-bold">{card.today.receipt.item} × {card.today.receipt.count}</p>
@@ -473,8 +503,9 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
                         <button type="button" disabled={busy} style={{ background: theme.accent, color: theme.on }} className={`flex w-full items-center justify-center gap-2 rounded-xl px-3 font-semibold disabled:opacity-50 ${restaurant ? "min-h-11 text-sm" : "min-h-12"}`} onClick={() => { setCheckinError(''); setCamera(true); }}><Camera size={19} aria-hidden="true" />{tx("Scan QR code")}</button>
                       )}
                       {camera && scanner.error && <p role="alert" className="col-span-full text-sm text-rose-700">{scanner.error}</p>}
-                      {restaurant && <button type="button" disabled={busy} className="min-h-11 w-full rounded-xl border border-[#D9DEE5] px-3 text-sm font-semibold disabled:opacity-50" onClick={() => prepareCheckin('', undefined, true)}>{tx('Use current meal code')}</button>}
-                      <form className="col-span-full flex gap-2" onSubmit={(event) => { event.preventDefault(); if (/^\d{6}$/.test(typed)) prepareCheckin(typed); }}>
+                      {restaurant && <button type="button" aria-expanded={manualCode} onClick={() => setManualCode(value => !value)} className="min-h-11 rounded-xl border border-slate-200 px-3 text-sm font-semibold md:hidden">{tx('Use a code')}</button>}
+                      {restaurant && <button type="button" disabled={busy} className={`${manualCode ? "" : "hidden md:block"} min-h-11 w-full rounded-xl border border-[#D9DEE5] px-3 text-sm font-semibold disabled:opacity-50`} onClick={() => prepareCheckin('', undefined, true)}>{tx('Use current meal code')}</button>}
+                      <form className={`col-span-full gap-2 ${restaurant && !manualCode ? "hidden md:flex" : "flex"}`} onSubmit={(event) => { event.preventDefault(); if (/^\d{6}$/.test(typed)) prepareCheckin(typed); }}>
                         <input className={`${restaurant ? mealField : `${field} font-mono text-xl tracking-[0.3em]`} !mt-0 min-w-0`} value={typed} onChange={(event) => setTyped(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" maxLength={6} placeholder={tx("6-digit code")} aria-label={tx('Code shown at the business')} />
                         <button type="submit" disabled={busy || typed.length !== 6} className={`shrink-0 rounded-xl border border-[#D9DEE5] px-3 font-semibold disabled:opacity-50 ${restaurant ? "min-h-11 text-sm" : "min-h-12"}`}>{tx('Use code')}</button>
                       </form>
@@ -482,16 +513,20 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
                   )}
                   {checkinError && <p role="alert" className="text-sm text-rose-700">{checkinError}</p>}
                   {card.program.windows?.length ? <p className="text-xs text-[#5B6470]">{tx("Serving hours (Kigali)")} · {card.program.windows.map((window) => `${window.item} ${window.from}–${window.to}`).join(' · ')}</p> : null}
-                  {card.tick && <div className="flex flex-wrap gap-2">{card.tick.items.map((x) => { const done = card.today.used.find((u) => u.item === x.item); return <span key={x.item} className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${done ? 'bg-emerald-50 text-emerald-800' : 'bg-[#F2F4F7] text-[#5B6470]'}`}>{done && <CheckCircle2 size={14} aria-hidden="true" />}{x.item}{done && <span className="tabular-nums opacity-80">· {clock(done.at)}</span>}</span>; })}</div>}
+                  {card.tick && <div className={restaurant ? "hidden flex-wrap gap-2 md:flex" : "flex flex-wrap gap-2"}>{card.tick.items.map((x) => { const done = card.today.used.find((u) => u.item === x.item); return <span key={x.item} className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${done ? 'bg-emerald-50 text-emerald-800' : 'bg-[#F2F4F7] text-[#5B6470]'}`}>{done && <CheckCircle2 size={14} aria-hidden="true" />}{x.item}{done && <span className="tabular-nums opacity-80">· {clock(done.at)}</span>}</span>; })}</div>}
                   {card.tick?.undo && <p role="status" className="flex items-center justify-between gap-2 rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-900"><span>{card.tick.undo.item} {tx('ticked')}. {tx('Wrong tap?')}</span><button type="button" disabled={busy} onClick={() => void act((s, id) => publicApi.untick(slug, s, id, card.tick!.undo!.useId))} className="min-h-9 px-2 font-semibold underline">{tx('Undo')}</button></p>}
                 </div>
               )}
-              {restaurant && purchasePanel}
+              {restaurant && purchasePanel && <div className="hidden md:block">{purchasePanel}</div>}
             </div>
+            </div>
+            <div className={restaurant && tab !== 'manage' ? 'hidden space-y-3 md:block' : 'space-y-3'}>
             {card.today.weekly && <p className="rounded-xl bg-white px-3 py-2 text-sm">{card.today.checkedMeal ? `${card.today.checkedMeal.item} · ${tx('Checked in')} · ${card.today.date}` : tx('The meal color appears after a confirmed check-in during serving hours.')}</p>}
             {!!card.history?.length && <details className="rounded-xl bg-white p-3 text-sm"><summary>{tx("Individual report")} · {card.history.length} {tx("check-ins")}</summary>
               <ul className="max-h-52 overflow-auto">{card.history.slice().reverse().map(u => <li key={u.id ?? u.at + u.item}>{u.date} · {clock(u.at)} · {u.item}{u.guest && ` · ${tx('Guest')}`}</li>)}</ul>
             </details>}
+            </div>
+            <div className={restaurant && tab !== 'card' ? 'hidden space-y-3 md:block' : 'space-y-3'}>
             <PaperCard key={card.cardId} b={b} card={card} w={w} animateMealTicks={restaurant} />
             {(m.state === 'active' || m.state === 'not_started') && card.qr && (
               <div className="rounded-2xl bg-white p-4 text-center">
@@ -502,6 +537,8 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
                 {m.state === 'not_started' && <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900">{t('Your {program} starts on')} {shortDate(m.startDate)}.</p>}
                 <p className="mt-2 flex items-center justify-center gap-1.5 text-xs text-[#5B6470]"><Clock size={13} aria-hidden="true" /><Ticking /></p>
               </div>)}
+            </div>
+            <div className={restaurant && tab !== 'manage' && m.state !== 'pending' ? 'hidden space-y-3 md:block' : 'space-y-3'}>
             {m.state === 'pending' && card.payment && (
               <div className="space-y-3 rounded-2xl bg-white p-4 text-left">
                 <p className="text-center font-display text-3xl font-semibold tabular-nums">{rwf(card.payment.amount)}</p>
@@ -523,6 +560,7 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
               </div>)}
             {(m.state === 'expired' || m.state === 'paused' || m.state === 'cancelled') && <p className="rounded-2xl bg-white p-4 text-sm">{m.state === 'expired' ? `${t('Your {program} ended on')} ${shortDate(m.endDate)}. ${tx('Join again from the business page to keep going.')}` : m.state === 'paused' ? t('The business paused your {program}. Ask them to resume it.') : t('This {program} was cancelled.')}</p>}
             {card.program.terms && <p className="px-1 text-xs text-[#5B6470]">{card.program.terms}</p>}
+            </div>
           </div>)}
       </div>
       {big && card?.qr && <div role="dialog" aria-modal="true" aria-label={tx('QR code')} className="fixed inset-0 z-[400] grid place-items-center bg-white p-6" onClick={() => setBig(false)}><div className="text-center"><Qr text={card.qr} size={Math.min(320, typeof window !== 'undefined' ? window.innerWidth - 48 : 300)} /><p className="mt-3 font-mono text-2xl font-semibold tracking-widest">{card.member.code}</p><p className="mt-2 text-sm text-[#5B6470]">{tx('Tap anywhere to close')}</p></div></div>}

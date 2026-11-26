@@ -26,6 +26,7 @@ export function renderShell(html: string, b: PublicBusiness, origin: string): st
   out = out.replace(/<meta\s+name=["']description["'][^>]*>\s*/i, '');
   // The business's own installable app: replace Bwenge's manifest and theme colour with the business's.
   out = out.replace(/<link\s+rel=["']manifest["'][^>]*>\s*/i, '').replace(/<meta\s+name=["']theme-color["'][^>]*>\s*/i, '');
-  const own = `<link rel="manifest" href="/api/biz/public/${encodeURIComponent(b.slug)}/manifest.webmanifest" />\n    <meta name="theme-color" content="${esc(THEME_COLOR[b.theme] ?? '#0E1722')}" />\n    <meta name="apple-mobile-web-app-title" content="${esc(b.name.slice(0, 24))}" />\n    <link rel="apple-touch-icon" href="/api/biz/public/${encodeURIComponent(b.slug)}/icon.svg" />`;
+  out = out.replace(/<link\s+rel=["']apple-touch-icon["'][^>]*>\s*/gi, '');
+  const own = `<link rel="manifest" href="/api/biz/public/${encodeURIComponent(b.slug)}/manifest.webmanifest" />\n    <meta name="theme-color" content="${esc(THEME_COLOR[b.theme] ?? '#0E1722')}" />\n    <meta name="apple-mobile-web-app-title" content="${esc(b.name.slice(0, 24))}" />\n    <link rel="apple-touch-icon" href="/api/biz/public/${encodeURIComponent(b.slug)}/icon-192.png${b.logo ? `?v=${encodeURIComponent(b.logo.id)}` : ''}" />`;
   return out.replace('</head>', `    ${tags}\n    ${own}\n  </head>`);
 }
