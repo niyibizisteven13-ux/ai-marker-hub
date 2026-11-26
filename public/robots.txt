@@ -10,4 +10,4 @@ Disallow: /mark
 Disallow: /transcript
 Disallow: /ms/
 
-Sitemap: https://www.bwenge.space/sitemap.xml
+Sitemap: https://bwenge.space/sitemap.xml

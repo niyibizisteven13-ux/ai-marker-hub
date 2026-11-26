@@ -61,7 +61,7 @@ export default function AboutPage() {
       link.rel = 'canonical';
       document.head.appendChild(link);
     }
-    link.href = 'https://www.bwenge.space/about';
+    link.href = 'https://bwenge.space/about';
     return () => {
       document.title = oldTitle;
       if (oldDescription === undefined) meta?.remove();

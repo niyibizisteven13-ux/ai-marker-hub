@@ -554,6 +554,17 @@ app.get('/exports/:file', requireAuth, async (req, res) => {
     return respondError(res, error, 'Could not retrieve export.');
   }
 });
+app.get('/sitemap.xml', async (_req, res) => {
+  try {
+    const { publicSitemap } = await import('./server/services/searchDiscovery.js');
+    const sitemap = await publicSitemap();
+    res.type('application/xml').setHeader('Cache-Control', 'public, max-age=60');
+    res.send(sitemap);
+  } catch {
+    res.setHeader('Cache-Control', 'no-store');
+    res.status(503).end();
+  }
+});
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Authenticated, detailed provider status for internal/admin debugging.
@@ -2932,14 +2943,45 @@ async function startServer() {
     const distPath = path.join(process.cwd(), 'dist');
     app.use('/litron-vpn', express.static(path.join(distPath, 'litron-vpn'), { fallthrough: false }));
     // MySEB as its own app: /ms (and the root of a myseb.<domain> host) is the same site with MySEB's own name, icon, colour and manifest in the head.
-    const mysebShell = async (req: express.Request, res: express.Response) => {
+    const mysebShell = async (_req: express.Request, res: express.Response) => {
       try {
         const html = await fs.readFile(path.join(distPath, 'index.html'), 'utf8'); const { renderMySebShell } = await import('./server/services/mysebShell.js');
-        res.type('html').setHeader('Cache-Control', 'no-cache'); res.send(renderMySebShell(html, process.env.APP_BASE_URL || `${req.protocol}://${req.get('host')}`));
+        const { SITE_ORIGIN } = await import('./server/services/searchDiscovery.js');
+        res.type('html').setHeader('Cache-Control', 'no-cache'); res.send(renderMySebShell(html, SITE_ORIGIN));
       } catch { res.sendFile(path.join(distPath, 'index.html')); }
     };
     app.get('/', (req, res, next) => (/^myseb\./i.test(req.hostname) ? void mysebShell(req, res) : next()));
     app.get(['/ms', '/ms/'], (req, res) => void mysebShell(req, res));
+    app.get(['/', '/about', '/our-story', '/get-app', '/research', '/myseb', '/terms', '/privacy'], async (req, res, next) => {
+      const researchHost = /^research\.bwenge\.space$/i.test(req.hostname);
+      if (req.path === '/' && !researchHost) return next();
+      try {
+        const { escapeMarkup, publicPages, publishedResearchSummary, renderSearchPage } = await import('./server/services/searchDiscovery.js');
+        const route = (req.path === '/' ? '/research' : req.path.replace(/\/$/, '')) as keyof typeof publicPages;
+        const html = await fs.readFile(path.join(distPath, 'index.html'), 'utf8');
+        const paperId = req.query.paper;
+        res.type('html').setHeader('Cache-Control', 'no-cache');
+        if (route === '/research' && req.query.studio !== undefined) {
+          res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+        }
+        if (route === '/research' && paperId !== undefined) {
+          const paper = typeof paperId === 'string' ? await publishedResearchSummary(paperId) : null;
+          if (!paper) {
+            res.setHeader('X-Robots-Tag', 'noindex');
+            return res.status(404).send(renderSearchPage(html, { ...publicPages['/research'], path: '/research' }));
+          }
+          const body = `<main><article><h1>${escapeMarkup(paper.title)}</h1><p>${escapeMarkup(paper.authors)}</p><h2>Abstract</h2><p>${escapeMarkup(paper.abstract)}</p></article></main>`;
+          return res.send(renderSearchPage(html, {
+            title: paper.title + ' | Bwenge4Research',
+            description: paper.abstract.replace(/\s+/g, ' ').slice(0, 180),
+            path: '/research?paper=' + encodeURIComponent(String(paperId)),
+          }, body));
+        }
+        return res.send(renderSearchPage(html, { ...publicPages[route], path: route }));
+      } catch (error) {
+        next(error);
+      }
+    });
     app.use(express.static(distPath, {
       setHeaders(res, file) {
         if (path.dirname(file) === path.join(distPath, 'assets') && /-[a-z0-9_-]{8,}\.(js|css|woff2)$/i.test(path.basename(file))) {
@@ -2947,7 +2989,10 @@ async function startServer() {
         }
       },
     }));
-    app.get(['/forms/:id', '/apply/:id'], (_req, res) => res.sendFile(path.join(distPath, 'index.html')));
+    app.get(['/forms/:id', '/apply/:id'], (_req, res) => {
+      res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
     // A business page: the same app, with the business's own name, tagline and cover photo in the head so a link shared on WhatsApp looks right.
     app.get(['/b/:slug', '/p/:slug'], async (req, res) => {
       try {
@@ -2955,9 +3000,12 @@ async function startServer() {
         const { bizService } = await import('./server/services/biz/runtime.js'); const { renderShell } = await import('./server/services/biz/shell.js');
         const b = await bizService().publicBySlug(String(req.params.slug));
         res.status(b ? 200 : 404).type('html').setHeader('Cache-Control', 'no-cache');
-        if (typeof req.query.pass === 'string') res.setHeader('X-Robots-Tag', 'noindex, nofollow');   // a meal pass link is a secret: never indexed
-        res.send(b ? renderShell(html, b, process.env.APP_BASE_URL || `${req.protocol}://${req.get('host')}`) : html);
-      } catch { res.sendFile(path.join(distPath, 'index.html')); }
+        if (!b || ['pass', 'tick', 'card', 'memberCard', 'plan', 'renew', 'source'].some(key => req.query[key] !== undefined)) {
+          res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+        }
+        const { SITE_ORIGIN } = await import('./server/services/searchDiscovery.js');
+        res.send(b ? renderShell(html, b, SITE_ORIGIN) : html);
+      } catch { res.status(503).setHeader('X-Robots-Tag', 'noindex').end(); }
     });
 
     // Unmatched API routes should 404 as JSON, not fall through to the SPA
@@ -2967,7 +3015,10 @@ async function startServer() {
       res.status(404).json({ error: `No such endpoint: ${req.method} ${req.originalUrl}` });
     });
 
-    app.get('*', (req, res) => res.sendFile(path.join(distPath, 'index.html')));
+    app.get('*', (req, res) => {
+      if (req.path !== '/') res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
   }
 
   server.listen(PORT, process.env.HOST || '0.0.0.0', () => {
