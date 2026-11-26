@@ -65,6 +65,7 @@ export const PROFILE_MAX = { timeline: 60, links: 12, skills: 30, featured: 6 };
 export interface Business {
   id: string; ownerId: string; slug: string; name: string; category: Category; tagline: string; about: string; theme: Theme;
   logoId?: string; coverId?: string;
+  appName?: string; appIconId?: string;
   /** Where the business is on the map (public when set). */
   lat?: number; lng?: number;
   whatsapp?: string; phone?: string; email?: string; address?: string; mapUrl?: string; website?: string; instagram?: string; facebook?: string;
@@ -242,6 +243,7 @@ export const publicMedia = (m: Media): PublicMedia => ({ id: m.id, kind: m.kind,
 export interface PublicBusiness {
   slug: string; name: string; category: Category; tagline: string; about: string; theme: Theme;
   logo?: PublicMedia; cover?: PublicMedia;
+  appName?: string; appIcon?: PublicMedia;
   androidApkAvailable?: boolean;
   contact: { whatsapp?: string; phone?: string; email?: string; address?: string; mapUrl?: string; website?: string; instagram?: string; facebook?: string };
   hours: Hours[];
@@ -277,7 +279,7 @@ export function publicView(b: Business): PublicBusiness {
   const out: PublicBusiness = {
     slug: b.slug, name: b.name, category: b.category, tagline: b.tagline, about: b.about, theme: b.theme, contact, hours: b.hours.map((h) => ({ ...h })),
     products: b.products.filter((p) => !p.hidden).map((p) => ({ id: p.id, name: p.name, price: p.price, ...(p.unit ? { unit: p.unit } : {}), ...(p.description ? { description: p.description } : {}), ...(p.url ? { url: p.url } : {}), ...(pm(p.mediaId) ? { media: pm(p.mediaId) } : {}), available: p.available })),
-    gallery: b.media.filter((m) => shown.has(m.id) && m.gallery !== false && m.id !== b.logoId && m.id !== b.coverId).map((m) => pm(m.id)!),
+    gallery: b.media.filter((m) => shown.has(m.id) && m.gallery !== false && m.id !== b.logoId && m.id !== b.coverId && m.id !== b.appIconId).map((m) => pm(m.id)!),
     updatedAt: b.updatedAt,
   };
   if (b.programText && Object.keys(b.programText).length) out.programText = { ...b.programText };
@@ -286,6 +288,9 @@ export function publicView(b: Business): PublicBusiness {
     const q = b.profile; out.profile = { ...(q.headline ? { headline: q.headline } : {}), ...(q.school ? { school: q.school } : {}), ...(q.field ? { field: q.field } : {}), ...(q.location ? { location: q.location } : {}), ...(q.openTo ? { openTo: q.openTo } : {}), ...(q.cvUrl ? { cvUrl: q.cvUrl } : {}), skills: [...q.skills], links: q.links.map((l) => ({ ...l })), featured: q.featured.map(pm).filter((x): x is PublicMedia => !!x), timeline: q.timeline.map(({ mediaIds, ...t }) => { const ms = (mediaIds ?? []).map(pm).filter((x): x is PublicMedia => !!x); return { ...t, ...(ms.length ? { media: ms } : {}) }; }) };
   }
   if (typeof b.lat === 'number' && typeof b.lng === 'number') out.location = { lat: b.lat, lng: b.lng };
+  const appIcon = pm(b.appIconId);
+  if (appIcon) out.appIcon = appIcon;
+  if (b.appName) out.appName = b.appName;
   const logo = pm(b.logoId), cover = pm(b.coverId); if (logo) out.logo = logo; if (cover) out.cover = cover;
   if (b.showPay && b.momoCode) out.pay = { momoCode: b.momoCode, ...(b.momoName ? { momoName: b.momoName } : {}) };
   return out;

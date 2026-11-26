@@ -1,3 +1,4 @@
+import { findBusinessApk, latestBusinessApkBuild, requestBusinessApk } from '../../biz/businessApp.js';
 import type { Tool, ToolServices } from '../types.js';
 import { err } from './helpers.js';
 import type { BizService } from '../../biz/service.js';
@@ -95,13 +96,13 @@ export function bizTools(getSvc: () => Promise<BizService> | BizService = async 
   };
   const addMedia: Tool = {
     definition: { name: 'biz_add_media', description: "Put a photo or short video the user attached in this chat onto their business page gallery (JPEG, PNG, WebP, GIF photos up to 6 MB; MP4 or WebM videos up to 200 MB on a paid plan, about a minute). Use the fileId of the attachment. A first photo becomes the cover. The user can see it publicly once the page is published.",
-      parameters: { type: 'object', required: ['fileId'], properties: { business: BUSINESS, fileId: { type: 'string' }, caption: { type: 'string' }, use_as: { type: 'string', enum: ['gallery', 'cover', 'logo'], description: 'Where it goes: the gallery (default), the big cover picture, or the logo (photos only).' } } } },
+      parameters: { type: 'object', required: ['fileId'], properties: { business: BUSINESS, fileId: { type: 'string' }, caption: { type: 'string' }, use_as: { type: 'string', enum: ['gallery', 'cover', 'logo', 'app_icon'], description: 'Where it goes: the gallery (default), the big cover picture, business logo, or dedicated customer app icon (photos only).' } } } },
     async execute(input, ctx) {
       try {
         const b = await pick(ctx.userId, input.business); if ('error' in b) return err(b.error);
-        const { meta, data } = await ctx.files.read(String(input.fileId), ctx.userId); const use = ['cover', 'logo'].includes(input.use_as) ? input.use_as : 'gallery';
+        const { meta, data } = await ctx.files.read(String(input.fileId), ctx.userId); const use = ['cover', 'logo', 'app_icon'].includes(input.use_as) ? input.use_as : 'gallery';
         const m = await (await svc()).addMedia(ctx.userId, b.id, { name: meta.name, data: Buffer.from(data), caption: input.caption });
-        if (use !== 'gallery') { if (m.kind !== 'image') return err('A cover or logo must be a photo.'); await (await svc()).update(ctx.userId, b.id, use === 'cover' ? { coverId: m.id } : { logoId: m.id }); }
+        if (use !== 'gallery') { if (m.kind !== 'image') return err('A cover or logo must be a photo.'); await (await svc()).update(ctx.userId, b.id, use === 'cover' ? { coverId: m.id } : use === 'app_icon' ? { appIconId: m.id } : { logoId: m.id }); }
         return { text: `Added the ${m.kind} as the ${use}${use === 'gallery' ? ' in the gallery' : ''}${b.published ? '' : ' (not public until the page is published)'}.` };
       } catch (e) { return failure(e); }
     },
@@ -532,5 +533,36 @@ export function bizTools(getSvc: () => Promise<BizService> | BizService = async 
       } catch (e) { return failure(e); }
     },
   };
-  return [get, create, update, addProduct, changeProduct, addMedia, publish, link, messages, record('sale'), record('expense'), dashboard, orders, requestPay, payStatus, paySetup, report, stock, agent, post, open, workflow, entries, costs, recurring, budget, program, planStatus, dayReport, venture, profile, feature, section, tracker, records, translate, language];
+  const customerApp: Tool = {
+    definition: { name: 'biz_customer_app', description: 'Check the customer app name, icon, install link and published APK. Set or reset the app name, or reset the app icon to the business logo when asked. Use biz_add_media with use_as app_icon for an attached image. The reset removes only the app setting; the uploaded photo stays in the business account. Set build_android only when the owner explicitly asks to build or rebuild this published business’s Android app.',
+      parameters: { type: 'object', properties: { business: BUSINESS, app_name: { type: 'string', description: 'New app name. An empty string restores the business name.' }, current_icon: { type: 'string', description: 'Exact filename or ID of an existing public business photo to use as the app icon.' }, reset_icon: { type: 'boolean', description: 'True only when the owner asked to restore the business logo.' }, build_android: { type: 'boolean', description: 'Request a signed APK build for this published business.' } } } },
+    async execute(input, ctx) {
+      try {
+        const b = await pick(ctx.userId, input.business);
+        if ('error' in b) return err(b.error);
+        if (b.category === 'profile') return err('Choose a Bwenge4Biz business.');
+        const iconName = typeof input.current_icon === 'string' ? input.current_icon.trim().toLowerCase() : undefined;
+        const matches = iconName !== undefined
+          ? b.media.filter(media => media.visible && !media.scope && media.kind === 'image' && (media.id === input.current_icon || media.name.toLowerCase() === iconName))
+          : [];
+        if (typeof input.current_icon === 'string' && matches.length !== 1) return err('Choose one exact filename or photo ID from this business.');
+        if (matches.length && input.reset_icon === true) return err('Choose whether to set the photo or restore the business logo.');
+        const patch = { ...(matches.length ? { appIconId: matches[0].id } : {}), ...(typeof input.app_name === 'string' ? { appName: input.app_name } : {}), ...(input.reset_icon === true ? { appIconId: '' } : {}) };
+        const current = Object.keys(patch).length ? await (await svc()).update(ctx.userId, b.id, patch) : b;
+        const published = current.published && !current.suspended;
+        const apk = published && await findBusinessApk(current.slug);
+        const build = input.build_android === true && published ? await requestBusinessApk(current.slug) : null;
+        const status = published && input.build_android !== true ? await latestBusinessApkBuild(current.slug) : null;
+        return { text: [
+          `App name: ${current.appName || current.name}`,
+          `App icon: ${current.appIconId ? 'custom app icon' : current.logoId ? 'business logo' : 'business initials'}`,
+          published ? `Customer app: ${linkOf(current)}?source=app` : 'Publish the business page to make the customer link available.',
+          ...(status ? [`Latest Android build: ${status}.`] : []),
+          ...(input.build_android === true ? [!published ? 'Publish the business page before building the APK.' : build === 'requested' ? 'Android build requested. The installer becomes downloadable once the build has been published.' : build === 'unconfigured' ? 'Android build dispatch has not been configured on this server.' : 'GitHub did not accept the Android build request.'] : []),
+          apk ? `Android APK: ${site()}/api/biz/public/${encodeURIComponent(current.slug)}/android.apk. Rebuild the APK after changing its name or icon.` : 'Android APK has not been published. The owner can still share the installable web app.',
+        ].join('\n') };
+      } catch (e) { return failure(e); }
+    },
+  };
+  return [get, create, update, customerApp, addProduct, changeProduct, addMedia, publish, link, messages, record('sale'), record('expense'), dashboard, orders, requestPay, payStatus, paySetup, report, stock, agent, post, open, workflow, entries, costs, recurring, budget, program, planStatus, dayReport, venture, profile, feature, section, tracker, records, translate, language];
 }

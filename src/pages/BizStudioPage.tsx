@@ -211,15 +211,41 @@ function PreviewTab({ b, urls }: { b: Business; urls: Record<string, string> }) 
   useEffect(() => { ownerApi.preview(b.id).then(setP).catch((e) => setErr(msg(e))); }, [b.id, b.updatedAt]);
   return <div><Title kind="public" hint="Exactly what visitors see, also before you publish. Phone-size on a phone, wide on a computer.">{tx("Preview")}</Title>{err && <p role="alert" className="text-sm text-rose-600">{err}</p>}{!p ? <Loader2 className="animate-spin text-[var(--brand)]" /> : <div className="overflow-hidden rounded-2xl border border-[var(--app-line)]"><BizPage business={p.business} openNow={p.openNow} mediaSrc={(id) => urls[id] ?? ''} preview /></div>}</div>;
 }
-function SettingsTab({ b, onChange, onDeleted }: { b: Business; onChange: () => void; onDeleted: () => void }) {
+function SettingsTab({ b, urls, onChange, onDeleted }: { b: Business; urls: Record<string, string>; onChange: () => void; onDeleted: () => void }) {
   const [slug, setSlug] = useState(b.slug); const [notes, setNotes] = useState(b.notes); const [busy, setBusy] = useState(''); const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null); const [confirm, setConfirm] = useState('');
-  useEffect(() => { setSlug(b.slug); setNotes(b.notes); }, [b.slug, b.notes]);
+  const [appName, setAppName] = useState(b.appName ?? '');
+  useEffect(() => { setSlug(b.slug); setNotes(b.notes); setAppName(b.appName ?? ''); }, [b.slug, b.notes, b.appName]);
   const run = async (k: string, fn: () => Promise<unknown>, ok: string) => { setBusy(k); setNote(null); try { await fn(); setNote({ ok: true, text: ok }); onChange(); } catch (e) { setNote({ ok: false, text: msg(e) }); } finally { setBusy(''); } };
   return (
     <div className="space-y-5">
       <div className={card}><Title kind="public">{tx("Page name (your short link)")}</Title>
         <div className="flex flex-wrap items-center gap-2"><span className="text-sm text-[var(--app-muted)]">{window.location.host}/b/</span><input className={`${input} !w-64 font-mono`} value={slug} maxLength={32} onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))} /><button type="button" className={btnPrimary} disabled={slug === b.slug || busy === 'slug'} onClick={() => void run('slug', () => ownerApi.update(b.id, { slug }), 'Page name changed.')}>{tx("Change")}</button></div>
         <p className="mt-2 text-xs text-[var(--app-faint)]">3 to 32 letters, numbers and dashes. If you change it, links you already shared stop working.</p></div>
+      <div className={card}>
+        <Title kind="public">{tx("Customer app")}</Title>
+        {(b.appIconId || b.logoId) && <img alt={tx("App icon preview")} src={urls[b.appIconId ?? b.logoId ?? ""]} width={56} height={56} className="mb-3 rounded-xl object-contain" />}
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="block text-sm font-medium">{tx("App name")}<input className={input} maxLength={40} placeholder={b.name} value={appName} onChange={event => setAppName(event.target.value)} /></label>
+          <label className="block text-sm font-medium">{tx("App icon")}
+            <input className={input} type="file" accept="image/png,image/jpeg,image/webp" disabled={!!busy} onChange={event => {
+              const file = event.currentTarget.files?.[0];
+              event.currentTarget.value = '';
+              if (!file) return;
+              void run('app-icon', async () => {
+                const image = await prepareImage(file);
+                const uploaded = await ownerApi.upload(b.id, image.blob, image.name, () => undefined);
+                await ownerApi.update(b.id, { appIconId: uploaded.id });
+              }, 'App icon updated.');
+            }} />
+          </label>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button type="button" className={btnPrimary} disabled={!!busy || appName.trim() === (b.appName ?? '')} onClick={() => void run('app-name', () => ownerApi.update(b.id, { appName }), 'App name saved.')}>{tx("Save app name")}</button>
+          {b.appIconId && <button type="button" className={btnGhost} disabled={!!busy} onClick={() => void run('app-icon', () => ownerApi.update(b.id, { appIconId: '' }), 'App now uses the business logo.')}>{tx("Use business logo")}</button>}
+          {b.published && !b.suspended && <a className={btnGhost} href={`${bizUrl(b.slug)}?source=app`} target="_blank" rel="noreferrer">{tx("Open customer app")}</a>}
+          {b.published && !b.suspended && b.category !== 'profile' && <button type="button" className={btnPrimary} disabled={!!busy} onClick={() => void run('build-app', () => ownerApi.buildAndroidApp(b.id), 'Android build queued. The business page will offer the APK once it is published.')}>{tx("Build Android APK")}</button>}
+        </div>
+      </div>
       <div className={card}><Title kind="private" hint="For you: suppliers, ideas, reminders. Never shown on your page.">{tx("Private notes")}</Title>
         <textarea className={input} rows={5} maxLength={2000} value={notes} onChange={(e) => setNotes(e.target.value)} /><button type="button" className={`${btnGhost} mt-3`} disabled={notes === b.notes || busy === 'notes'} onClick={() => void run('notes', () => ownerApi.update(b.id, { notes }), 'Notes saved.')}>{tx("Save notes")}</button></div>
       {note && <p role="status" className={`text-sm ${note.ok ? 'text-emerald-700' : 'text-rose-600'}`}>{note.text}</p>}
@@ -321,7 +347,7 @@ export default function BizStudioPage({ onBack }: { onBack: () => void }) {
               {view === 'chat' && <AgentChatView b={b} onChange={reload} />}
               {view === 'agent' && <AgentView b={b} paid={mine.paid !== false} />}
               {view === 'secrets' && <SecretsView b={b} secrets={secrets} paid={mine.paid !== false} reload={() => { loadSecrets(); void load(); }} />}
-              {view === 'settings' && <><h1 className="mb-4 font-display text-2xl font-semibold tracking-tight">{tx("Settings")}</h1><SettingsTab b={b} onChange={reload} onDeleted={() => { setView('dashboard'); void load(); }} /></>}
+              {view === 'settings' && <><h1 className="mb-4 font-display text-2xl font-semibold tracking-tight">{tx("Settings")}</h1><SettingsTab b={b} urls={urls} onChange={reload} onDeleted={() => { setView('dashboard'); void load(); }} /></>}
               {view === 'public' && (<>
                 <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h1 className="font-display text-2xl font-semibold tracking-tight">{tx("Public page")}</h1><Tag kind="public" /></div>
                   <div className="inline-flex rounded-xl border border-[var(--app-line)] bg-[var(--app-panel)] p-1" role="tablist">{([['page', 'Details'], ['gallery', 'Photos and videos'], ['preview', 'Preview']] as const).filter(([id]) => !(kind === 'profile' && id === 'page')).map(([id, l]) => <button key={id} type="button" role="tab" aria-selected={sub === id} onClick={() => setSub(id)} className={`rounded-lg px-3.5 py-2 text-sm font-semibold ${sub === id ? 'bg-[var(--brand)] text-[var(--brand-on)]' : 'text-[var(--app-muted)]'}`}>{l}</button>)}</div></div>

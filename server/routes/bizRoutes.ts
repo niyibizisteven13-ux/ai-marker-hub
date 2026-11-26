@@ -1,6 +1,5 @@
 import sharp from 'sharp';
-import { stat } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { findBusinessApk, requestBusinessApk } from '../services/biz/businessApp.js';
 import { Router, type Request, type Response } from 'express';
 import multer from 'multer';
 import { requireAuth } from '../../production/auth.js';
@@ -79,13 +78,6 @@ async function send(req: Request, res: Response, f: Served, cache: string) {
 /** A year, because the address names the revision of the file; otherwise an hour (and a day for plain photos). */
 const mediaCache = (req: Request, kind: 'video' | 'image') => (/^\d{1,15}$/.test(String(req.query.r ?? '')) ? 'public, max-age=31536000, immutable' : kind === 'video' ? 'public, max-age=3600' : 'public, max-age=86400');
 
-async function findBusinessApk(slug: string): Promise<string | null> {
-  const directory = process.env.BWENGE_BIZ_APK_DIR;
-  if (!directory || !/^[a-z0-9][a-z0-9-]*$/.test(slug)) return null;
-  const filename = resolve(directory, slug + '.apk');
-  const file = await stat(filename).catch(() => null);
-  return file?.isFile() && file.size > 0 ? filename : null;
-}
 
 export function createBizRouter(): Router {
   const r = Router();
@@ -116,14 +108,15 @@ export function createBizRouter(): Router {
   r.get('/public/:slug/manifest.webmanifest', run(async (req, res) => {
     const b = await svc().publicBySlug(req.params.slug); if (!b) return res.status(404).end(); const slug = encodeURIComponent(b.slug);
     res.type('application/manifest+json').setHeader('Cache-Control', 'public, max-age=600');
-    res.json({ name: b.name, short_name: b.name.slice(0, 12), description: b.tagline || undefined, id: `/b/${slug}`, start_url: `/b/${slug}?source=app`, scope: `/b/${slug}`, display: 'standalone', orientation: 'portrait',
-      background_color: '#FFFFFF', theme_color: THEME_COLOR[b.theme] ?? '#0E1722', icons: [192, 512].map(size => ({ src: `/api/biz/public/${slug}/icon-${size}.png${b.logo ? `?v=${encodeURIComponent(b.logo.id)}` : ''}`, sizes: `${size}x${size}`, type: 'image/png', purpose: 'any' })) });
+    res.json({ name: b.appName || b.name, short_name: (b.appName || b.name).slice(0, 16), description: b.tagline || undefined, id: `/b/${slug}`, start_url: `/b/${slug}?source=app`, scope: `/b/${slug}`, display: 'standalone', orientation: 'portrait',
+      background_color: '#FFFFFF', theme_color: THEME_COLOR[b.theme] ?? '#0E1722', icons: [192, 512].map(size => ({ src: `/api/biz/public/${slug}/icon-${size}.png${b.appIcon || b.logo ? `?v=${encodeURIComponent((b.appIcon ?? b.logo)!.id)}` : ''}`, sizes: `${size}x${size}`, type: 'image/png', purpose: 'any' })) });
   }));
   r.get(['/public/:slug/icon-192.png', '/public/:slug/icon-512.png'], bizMediaLimiter, run(async (req, res) => {
     const b = await svc().publicBySlug(req.params.slug);
     if (!b) return res.status(404).end();
     const size = req.path.endsWith('icon-192.png') ? 192 : 512;
-    const logo = b.logo?.kind === 'image' ? await svc().mediaFor(b.slug, b.logo.id) : null;
+    const icon = b.appIcon ?? b.logo;
+    const logo = icon?.kind === 'image' ? await svc().mediaFor(b.slug, icon.id) : null;
     let png: Buffer | undefined;
     if (logo && logo.size <= MAX_IMAGE_BYTES) {
       try {
@@ -139,7 +132,7 @@ export function createBizRouter(): Router {
     res.send(png);
   }));
   r.get('/public/:slug/android.apk', run(async (req, res) => {
-    const b = process.env.BWENGE_BIZ_APK_DIR ? await svc().publicBySlug(req.params.slug) : null;
+    const b = await svc().publicBySlug(req.params.slug);
     if (!b) return res.status(404).end();
     const filename = await findBusinessApk(b.slug);
     if (!filename) return res.status(404).end();
@@ -209,6 +202,14 @@ export function createBizRouter(): Router {
   }));
   r.put('/prefs', run(async (req, res) => res.json({ prefs: await svc().setPrefs(me(req), req.body ?? {}) })));
   r.post('/', run(async (req, res) => res.status(201).json({ business: await svc().create(me(req), req.body ?? {}) })));
+  r.post('/:id/customer-app/android-build', run(async (req, res) => {
+    const b = await svc().get(me(req), req.params.id);
+    if (b.category === 'profile' || !b.published || b.suspended) return res.status(409).json({ error: 'Publish the business page before building its app.' });
+    const status = await requestBusinessApk(b.slug);
+    if (status === 'unconfigured') return res.status(503).json({ error: 'Android build service is not configured yet.' });
+    if (status === 'failed') return res.status(502).json({ error: 'Could not queue the Android build. Try again.' });
+    return res.status(202).json({ queued: true });
+  }));
   r.get('/:id', run(async (req, res) => res.json({ business: await svc().get(me(req), req.params.id) })));
   r.patch('/:id', run(async (req, res) => res.json({ business: await svc().update(me(req), req.params.id, req.body ?? {}) })));
   r.delete('/:id', run(async (req, res) => { await svc().remove(me(req), req.params.id); res.status(204).end(); }));
