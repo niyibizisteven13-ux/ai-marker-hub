@@ -1,9 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
-    <loc>https://www.bwenge.space/</loc>
+    <loc>https://bwenge.space/</loc>
   </url>
   <url>
-    <loc>https://www.bwenge.space/about</loc>
+    <loc>https://bwenge.space/about</loc>
   </url>
+  <url><loc>https://bwenge.space/get-app</loc></url>
+  <url><loc>https://bwenge.space/research</loc></url>
+  <url><loc>https://bwenge.space/ms</loc></url>
+  <url><loc>https://bwenge.space/our-story</loc></url>
+  <url><loc>https://bwenge.space/myseb</loc></url>
+  <url><loc>https://bwenge.space/terms</loc></url>
+  <url><loc>https://bwenge.space/privacy</loc></url>
 </urlset>
