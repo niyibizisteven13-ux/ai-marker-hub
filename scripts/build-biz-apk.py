@@ -64,7 +64,10 @@ def main():
         manifest.write_text(f"""<manifest xmlns:android="http://schemas.android.com/apk/res/android"
             package="{app_id}" android:versionCode="{args.version_code}" android:versionName="1.{args.version_code}">
           <uses-sdk android:minSdkVersion="23" android:targetSdkVersion="35" />
-          <application android:label="{name}" android:icon="@drawable/business_icon" android:allowBackup="false">
+          <uses-permission android:name="android.permission.INTERNET" />
+          <uses-permission android:name="android.permission.CAMERA" />
+          <uses-feature android:name="android.hardware.camera" android:required="false" />
+          <application android:usesCleartextTraffic="false" android:label="{name}" android:icon="@drawable/business_icon" android:allowBackup="false">
             <activity android:name=".BusinessActivity" android:exported="true">
               <intent-filter><action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" /></intent-filter>
@@ -74,28 +77,99 @@ def main():
         source = build / "BusinessActivity.java"
         source.write_text(f"""package {app_id};
 import android.app.Activity;
+import android.Manifest;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Bundle;
-import android.widget.TextView;
+import android.view.WindowInsets;
+import android.webkit.PermissionRequest;
+import android.webkit.WebChromeClient;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
+import java.util.Arrays;
 
 public final class BusinessActivity extends Activity {{
+  private static final int CAMERA_REQUEST = 1;
+  private static final String PAGE_PATH = "/b/{args.slug}";
+  private WebView browser;
+  private PermissionRequest camera;
+
+  private static boolean businessOrigin(Uri url) {{
+    return "https".equals(url.getScheme()) && (url.getPort() == -1 || url.getPort() == 443)
+      && ("bwenge.space".equals(url.getHost()) || "www.bwenge.space".equals(url.getHost()));
+  }}
+
   @Override public void onCreate(Bundle state) {{
     super.onCreate(state);
-    Intent browser = new Intent(Intent.ACTION_VIEW, Uri.parse("{ORIGIN}/b/{args.slug}?source=android"));
-    Bundle customTab = new Bundle();
-    customTab.putBinder("android.support.customtabs.extra.SESSION", null);
-    browser.putExtras(customTab);
-    try {{
-      startActivity(browser);
-      finish();
-    }} catch (ActivityNotFoundException unavailable) {{
-      TextView message = new TextView(this);
-      message.setPadding(32, 48, 32, 32);
-      message.setText("Install a web browser to open this business app.");
-      setContentView(message);
+    browser = new WebView(this);
+    browser.getSettings().setJavaScriptEnabled(true);
+    browser.getSettings().setDomStorageEnabled(true);
+    browser.getSettings().setAllowFileAccess(false);
+    browser.getSettings().setAllowContentAccess(false);
+    browser.getSettings().setMixedContentMode(android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+    browser.setWebViewClient(new WebViewClient() {{
+      @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {{
+        if (!request.isForMainFrame()) return false;
+        Uri url = request.getUrl();
+        if (businessOrigin(url) && PAGE_PATH.equals(url.getPath())) return false;
+        String scheme = url.getScheme();
+        if ("https".equals(scheme) || "tel".equals(scheme) || "mailto".equals(scheme)) {{
+          try {{ startActivity(new Intent(Intent.ACTION_VIEW, url)); }}
+          catch (ActivityNotFoundException unavailable) {{ /* No handler is installed. */ }}
+        }}
+        return true;
+      }}
+    }});
+    browser.setWebChromeClient(new WebChromeClient() {{
+      @Override public void onPermissionRequest(PermissionRequest request) {{
+        if (!businessOrigin(request.getOrigin()) || !Arrays.asList(request.getResources()).contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE)) {{
+          request.deny();
+          return;
+        }}
+        if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {{
+          request.grant(new String[]{{ PermissionRequest.RESOURCE_VIDEO_CAPTURE }});
+        }} else if (camera == null) {{
+          camera = request;
+          requestPermissions(new String[]{{ Manifest.permission.CAMERA }}, CAMERA_REQUEST);
+        }} else {{
+          request.deny();
+        }}
+      }}
+
+      @Override public void onPermissionRequestCanceled(PermissionRequest request) {{
+        if (camera == request) camera = null;
+      }}
+    }});
+    if (android.os.Build.VERSION.SDK_INT >= 30) {{
+      browser.setOnApplyWindowInsetsListener((view, insets) -> {{
+        android.graphics.Insets padding = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+        view.setPadding(padding.left, padding.top, padding.right, padding.bottom);
+        return insets;
+      }});
     }}
+    setContentView(browser);
+    browser.loadUrl("{ORIGIN}" + PAGE_PATH + "?source=android");
+  }}
+
+  @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grants) {{
+    super.onRequestPermissionsResult(requestCode, permissions, grants);
+    if (requestCode != CAMERA_REQUEST || camera == null) return;
+    PermissionRequest request = camera;
+    camera = null;
+    if (grants.length > 0 && grants[0] == PackageManager.PERMISSION_GRANTED) {{
+      request.grant(new String[]{{ PermissionRequest.RESOURCE_VIDEO_CAPTURE }});
+    }} else {{
+      request.deny();
+    }}
+  }}
+
+  @Override protected void onDestroy() {{
+    if (camera != null) {{ camera.deny(); camera = null; }}
+    if (browser != null) browser.destroy();
+    super.onDestroy();
   }}
 }}
 """, encoding="utf-8")
@@ -103,7 +177,7 @@ public final class BusinessActivity extends Activity {{
         classes.mkdir()
         run("javac", "--release", "8", "-classpath", android_jar, "-d", classes, source)
         run(tools / "d8", "--min-api", "23", "--lib", android_jar, "--output", build,
-            next(classes.rglob("BusinessActivity.class")))
+            *sorted(classes.rglob("*.class")))
         unsigned = build / "unsigned.apk"
         run(tools / "aapt", "package", "-f", "-M", manifest, "-S", resources, "-I", android_jar, "-F", unsigned)
         with ZipFile(unsigned, "a") as apk:

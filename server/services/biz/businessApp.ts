@@ -11,8 +11,12 @@ export async function findBusinessApk(slug: string): Promise<string | null> {
 
 const ANDROID_WORKFLOW = 'https://api.github.com/repos/niyibizisteven13-ux/ai-marker-hub/actions/workflows/biz-android-apk.yml';
 
+export function isBusinessApkBuildConfigured(): boolean {
+  return !!process.env.BWENGE_BIZ_APK_WORKFLOW_TOKEN?.trim();
+}
+
 export async function requestBusinessApk(slug: string): Promise<'requested' | 'unconfigured' | 'failed'> {
-  const token = process.env.BWENGE_BIZ_APK_WORKFLOW_TOKEN;
+  const token = process.env.BWENGE_BIZ_APK_WORKFLOW_TOKEN?.trim();
   if (!token) return 'unconfigured';
   if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(slug)) return 'failed';
   const response = await fetch(ANDROID_WORKFLOW + '/dispatches', {
@@ -25,7 +29,7 @@ export async function requestBusinessApk(slug: string): Promise<'requested' | 'u
 }
 
 export async function latestBusinessApkBuild(slug: string): Promise<string | null> {
-  const token = process.env.BWENGE_BIZ_APK_WORKFLOW_TOKEN;
+  const token = process.env.BWENGE_BIZ_APK_WORKFLOW_TOKEN?.trim();
   if (!token || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(slug)) return null;
   try {
     const response = await fetch(ANDROID_WORKFLOW + '/runs?event=workflow_dispatch&branch=main&per_page=50', {

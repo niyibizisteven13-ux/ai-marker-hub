@@ -165,9 +165,8 @@ function BizPageInner({ business: b, base, lang, setLang, openNow, mediaSrc, pre
   const tx = useTx();
   const theme = THEMES[b.theme] ?? THEMES.gold; const preset = presetFor(b.category);
   const [box, setBox] = useState<number | null>(null); const [report, setReport] = useState(false); const [toast, setToast] = useState(''); const [cart, setCart] = useState<Cart>({}); const [checkout, setCheckout] = useState<null | 'order' | 'pay'>(null);
-  const [rawPosts, setPosts] = useState<PublicPost[]>([]); const posts = useMemo(() => localizePosts(rawPosts, base, lang), [rawPosts, base, lang]); const [postBox, setPostBox] = useState<{ items: PublicMedia[]; i: number } | null>(null); const [qr, setQr] = useState(''); const [installEvt, setInstallEvt] = useState<any>(null); const toastTimer = useRef<number | undefined>(undefined);
+  const [rawPosts, setPosts] = useState<PublicPost[]>([]); const posts = useMemo(() => localizePosts(rawPosts, base, lang), [rawPosts, base, lang]); const [postBox, setPostBox] = useState<{ items: PublicMedia[]; i: number } | null>(null); const [qr, setQr] = useState(''); const toastTimer = useRef<number | undefined>(undefined);
   const [installNotice, setInstallNotice] = useState(false);
-  const installHelp = useRef<HTMLDialogElement>(null);
   const installInstructions = useRef<HTMLParagraphElement>(null);
   const isAppleMobile = typeof navigator !== 'undefined' && (/iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
   const apkUrl = `/api/biz/public/${encodeURIComponent(b.slug)}/android.apk`;
@@ -191,7 +190,6 @@ function BizPageInner({ business: b, base, lang, setLang, openNow, mediaSrc, pre
   const share = async () => { track('share'); try { if (navigator.share) { await navigator.share({ title: b.name, text: b.tagline || b.name, url }); return; } await navigator.clipboard.writeText(url); say('Link copied'); } catch { /* cancelled */ } };
   const copy = async (text: string, what: string) => { try { await navigator.clipboard.writeText(text); say(`${what} copied`); } catch { say('Could not copy'); } };
   useEffect(() => { let alive = true; void import('qrcode').then((m: any) => (m.default ?? m).toDataURL(url, { margin: 1, width: 420, color: { dark: '#0E1722', light: '#FFFFFF' } })).then((d: string) => { if (alive) setQr(d); }).catch(() => undefined); return () => { alive = false; }; }, [url]);
-  useEffect(() => { const h = (e: Event) => { e.preventDefault(); setInstallEvt(e); }; window.addEventListener('beforeinstallprompt', h); return () => window.removeEventListener('beforeinstallprompt', h); }, []);
   // A shared plan link (?plan=<id>) opens the join form; a pass link (?pass=<secret>) opens the student's pass.
   useEffect(() => {
     if (preview) return; const q = new URLSearchParams(window.location.search); const card = q.get('pass') || q.get('card'); const plan = q.get('renew') || q.get('plan');
@@ -205,44 +203,26 @@ function BizPageInner({ business: b, base, lang, setLang, openNow, mediaSrc, pre
   useEffect(() => { let alive = true; void publicApi.posts(b.slug, new URLSearchParams(window.location.search).get('post') ?? undefined).then((p) => { if (alive) setPosts(p); }).catch(() => undefined); return () => { alive = false; }; }, [b.slug, b.updatedAt]);
   useEffect(() => { if (!posts.length) return; const h = window.location.hash; if (h.startsWith('#post-') || h === '#updates') window.setTimeout(() => document.getElementById(h.slice(1))?.scrollIntoView({ block: 'start' }), 300); }, [posts.length]);
   const appName = b.appName || b.name;
-  const showInstallHelp = () => {
-    const dialog = installHelp.current;
-    if (dialog && typeof dialog.showModal === 'function') {
-      try {
-        if (!dialog.open) dialog.showModal();
-        return;
-      } catch { /* The inline instructions are available if the dialog cannot open. */ }
-    }
-    installInstructions.current?.focus();
-    installInstructions.current?.scrollIntoView({ block: 'center' });
-  };
+  const canDownloadApk = !!b.androidApkAvailable && !isAppleMobile;
   useEffect(() => {
-    if (preview || appEntry || cardView || joining || window.matchMedia('(display-mode: standalone)').matches) return;
+    if (preview || !canDownloadApk || appEntry || cardView || joining || window.matchMedia('(display-mode: standalone)').matches) return;
     const key = `biz-install-notice:${b.slug}`;
     try {
       if (localStorage.getItem(key)) return;
       localStorage.setItem(key, '1');
       setInstallNotice(true);
     } catch { /* The permanent Download app button is still available. */ }
-  }, [preview, appEntry, cardView, joining, b.slug]);
-  const openInstall = () => {
-    setInstallNotice(false);
-    if (!installEvt) {
-      showInstallHelp();
-      return;
-    }
-    setInstallEvt(null);
-    void (async () => {
-      try { await installEvt.prompt(); } catch { showInstallHelp(); }
-    })();
-  };
+  }, [preview, canDownloadApk, appEntry, cardView, joining, b.slug]);
   const installButton = () => {
     if (preview) return null;
     const className = 'inline-flex min-h-11 items-center gap-2 rounded-xl border border-[#D5DBE3] bg-white px-3 text-sm font-semibold text-[#0E1722] shadow-sm hover:bg-[#F6F7F9]';
     const label = <><Download size={16} aria-hidden="true" />{tx("Install app")}</>;
-    return b.androidApkAvailable && !isAppleMobile
-      ? <a href={apkUrl} download={`${b.slug}.apk`} className={className}>{label}</a>
-      : <button type="button" onClick={openInstall} className={className}>{label}</button>;
+    if (canDownloadApk) return <a href={apkUrl} download={`${b.slug}.apk`} className={className}>{label}</a>;
+    if (isAppleMobile) return <button type="button" className={className} onClick={() => {
+      installInstructions.current?.focus();
+      installInstructions.current?.scrollIntoView({ block: 'center' });
+    }}>{label}</button>;
+    return <button type="button" disabled className={`${className} cursor-not-allowed opacity-60`}>{tx("APK unavailable")}</button>;
   };
   const add = (id: string, d = 1) => setCart((x) => ({ ...x, [id]: Math.max(0, Math.min(99, (x[id] ?? 0) + d)) }));
   const go = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -381,10 +361,8 @@ function BizPageInner({ business: b, base, lang, setLang, openNow, mediaSrc, pre
                 <div className="mt-3 flex flex-wrap justify-center gap-2">{qr && <a href={qr} download={`${b.slug}-qr.png`} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-[#D5DBE3] px-3 text-sm font-semibold hover:bg-[#F6F7F9]"><Download size={15} />{tx("Save QR")}</a>}
                   {installButton()}
                 </div>
-                {!preview && <p ref={installInstructions} tabIndex={-1} className="mt-3 rounded-md text-xs leading-relaxed text-[#475467] focus:outline-2 focus:outline-offset-2">
-                  {tx("iPhone: In Safari, tap Share, then Add to Home Screen.")}{' '}
-                  {(!b.androidApkAvailable || isAppleMobile) && tx("Android: In Chrome, open the menu and choose Install app or Add to Home screen.")}
-                </p>}
+                {!preview && isAppleMobile && <p ref={installInstructions} tabIndex={-1} className="mt-3 rounded-md text-sm text-[#475467] focus:outline-2 focus:outline-offset-2">{tx("iPhone: In Safari, tap Share, then Add to Home Screen.")}</p>}
+                {!preview && !isAppleMobile && !canDownloadApk && <p className="mt-3 text-xs text-[#475467]">{tx("This business hasn’t published its Android APK yet.")}</p>}
               </div>
             </aside>
           </div>
@@ -396,27 +374,12 @@ function BizPageInner({ business: b, base, lang, setLang, openNow, mediaSrc, pre
       {/* cart bar */}
       {count > 0 && !checkout && <div className="fixed inset-x-0 bottom-0 z-40 p-3 sm:p-4"><button type="button" onClick={() => setCheckout('order')} className="mx-auto flex min-h-14 w-full max-w-xl items-center justify-between gap-3 rounded-2xl bg-[#0E1722] px-5 text-white shadow-2xl"><span className="inline-flex items-center gap-2.5 text-[15px] font-semibold"><span className="flex h-7 min-w-7 items-center justify-center rounded-full bg-[var(--acc)] px-1.5 text-sm text-[var(--on)]">{count}</span>{tx("View your order")}</span><b>{lines.every((l) => l.p.price !== null) ? `${total.toLocaleString('en-US')} RWF` : ''}</b></button></div>}
       {joining && <JoinFlow renewing={renewing} b={b} lang={lang} program={joining} onClose={() => setJoining(null)} onDone={() => { setInitialCard(undefined); setRenewing(false); setProgramId(joining.id); setJoining(null); setCardView('dashboard'); try { window.history.replaceState({}, '', window.location.pathname); } catch { /* optional */ } }} />}
-      {!preview && installNotice && !cardView && !joining && <aside aria-label={tx("Install app")} className="fixed inset-x-3 bottom-3 z-40 mx-auto flex max-w-md items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 text-[#0E1722] shadow-xl">
+      {!preview && canDownloadApk && installNotice && !cardView && !joining && <aside aria-label={tx("Install app")} className="fixed inset-x-3 bottom-3 z-40 mx-auto flex max-w-md items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 text-[#0E1722] shadow-xl">
         <img src={`/api/biz/public/${encodeURIComponent(b.slug)}/icon-192.png`} alt="" width={42} height={42} className="shrink-0 rounded-xl" />
         <p className="min-w-0 flex-1 text-sm font-semibold">{appName}</p>
-        {b.androidApkAvailable && !isAppleMobile
-          ? <a href={apkUrl} download={`${b.slug}.apk`} onClick={() => setInstallNotice(false)} className="inline-flex min-h-11 shrink-0 items-center rounded-xl bg-slate-950 px-3 text-sm font-semibold text-white">{tx("Download app")}</a>
-          : <button type="button" onClick={openInstall} className="min-h-11 shrink-0 rounded-xl bg-slate-950 px-3 text-sm font-semibold text-white">{tx("Install app")}</button>}
+        <a href={apkUrl} download={`${b.slug}.apk`} onClick={() => setInstallNotice(false)} className="inline-flex min-h-11 shrink-0 items-center rounded-xl bg-slate-950 px-3 text-sm font-semibold text-white">{tx("Install app")}</a>
         <button type="button" onClick={() => setInstallNotice(false)} className="grid h-11 w-11 shrink-0 place-items-center rounded-xl hover:bg-slate-100" aria-label={tx("Dismiss")}><X size={18} aria-hidden="true" /></button>
       </aside>}
-      {!preview && <dialog ref={installHelp} aria-labelledby="biz-install-title" onClick={event => {
-        if (event.target !== event.currentTarget) return;
-        const bounds = event.currentTarget.getBoundingClientRect();
-        if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) event.currentTarget.close();
-      }} className="m-auto w-[calc(100%-2rem)] max-w-sm rounded-2xl bg-white p-5 text-[#0E1722] shadow-xl backdrop:bg-black/55">
-        <div className="flex items-center justify-between gap-3">
-          <h2 id="biz-install-title" className="font-display text-xl font-semibold">{tx("Install app")}</h2>
-          <form method="dialog"><button type="submit" className="grid h-11 w-11 place-items-center rounded-xl hover:bg-slate-100" aria-label={tx("Close")}><X size={18} aria-hidden="true" /></button></form>
-        </div>
-        <p className="mb-3 text-sm font-semibold">{appName}</p>
-        <p className="text-sm text-[#475467]">{tx("Android: Open in Chrome, then choose Install app or Add to Home screen from the browser menu.")}</p>
-        <p className="mt-3 text-sm text-[#475467]">{tx("iPhone: Open in Safari, tap Share, and choose Add to Home Screen.")}</p>
-      </dialog>}
       {cardView === 'signin' && <SignIn b={b} lang={lang} app={appEntry} onClose={() => { if (appEntry) window.history.replaceState({}, '', window.location.pathname); setCardView(null); }} onDone={(passcode) => { if (scanCode && b.category === 'restaurant') scanPasscode.current = passcode; setCardView('dashboard'); }} />}
       {cardView === 'dashboard' && <Dashboard initialCard={initialCard} programId={programId} b={b} lang={lang} scanCode={scanCode || undefined} takeScanPasscode={() => { const passcode = scanPasscode.current; scanPasscode.current = ''; return passcode; }} onClose={() => { setScanCode(''); scanPasscode.current = ''; setCardView(null); try { window.history.replaceState({}, '', window.location.pathname); } catch { /* optional */ } }} onSignedOut={() => setCardView('signin')} />}
       {checkout && <Checkout b={b} cart={cart} setCart={setCart} preview={preview} startPay={checkout === 'pay'} waLink={waBase} onClose={() => setCheckout(null)} />}

@@ -1,5 +1,5 @@
 import sharp from 'sharp';
-import { findBusinessApk, requestBusinessApk } from '../services/biz/businessApp.js';
+import { findBusinessApk, isBusinessApkBuildConfigured, requestBusinessApk } from '../services/biz/businessApp.js';
 import { Router, type Request, type Response } from 'express';
 import multer from 'multer';
 import { requireAuth } from '../../production/auth.js';
@@ -202,6 +202,12 @@ export function createBizRouter(): Router {
   }));
   r.put('/prefs', run(async (req, res) => res.json({ prefs: await svc().setPrefs(me(req), req.body ?? {}) })));
   r.post('/', run(async (req, res) => res.status(201).json({ business: await svc().create(me(req), req.body ?? {}) })));
+  r.get('/:id/customer-app/android-build', run(async (req, res) => {
+    const b = await svc().get(me(req), req.params.id);
+    const eligible = b.category !== 'profile' && b.published && !b.suspended;
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ enabled: eligible && isBusinessApkBuildConfigured() });
+  }));
   r.post('/:id/customer-app/android-build', run(async (req, res) => {
     const b = await svc().get(me(req), req.params.id);
     if (b.category === 'profile' || !b.published || b.suspended) return res.status(409).json({ error: 'Publish the business page before building its app.' });

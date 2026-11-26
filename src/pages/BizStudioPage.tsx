@@ -214,6 +214,19 @@ function PreviewTab({ b, urls }: { b: Business; urls: Record<string, string> }) 
 function SettingsTab({ b, urls, onChange, onDeleted }: { b: Business; urls: Record<string, string>; onChange: () => void; onDeleted: () => void }) {
   const [slug, setSlug] = useState(b.slug); const [notes, setNotes] = useState(b.notes); const [busy, setBusy] = useState(''); const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null); const [confirm, setConfirm] = useState('');
   const [appName, setAppName] = useState(b.appName ?? '');
+  const [buildStatus, setBuildStatus] = useState<'checking' | 'enabled' | 'disabled' | 'error'>('checking');
+  const canPublishApp = b.published && !b.suspended && b.category !== 'profile';
+  useEffect(() => {
+    if (!canPublishApp) return;
+    const controller = new AbortController();
+    setBuildStatus('checking');
+    void ownerApi.androidBuildStatus(b.id, controller.signal).then(({ enabled }) => {
+      if (!controller.signal.aborted) setBuildStatus(enabled ? 'enabled' : 'disabled');
+    }).catch(() => {
+      if (!controller.signal.aborted) setBuildStatus('error');
+    });
+    return () => controller.abort();
+  }, [b.id, canPublishApp]);
   useEffect(() => { setSlug(b.slug); setNotes(b.notes); setAppName(b.appName ?? ''); }, [b.slug, b.notes, b.appName]);
   const run = async (k: string, fn: () => Promise<unknown>, ok: string) => { setBusy(k); setNote(null); try { await fn(); setNote({ ok: true, text: ok }); onChange(); } catch (e) { setNote({ ok: false, text: msg(e) }); } finally { setBusy(''); } };
   return (
@@ -243,8 +256,16 @@ function SettingsTab({ b, urls, onChange, onDeleted }: { b: Business; urls: Reco
           <button type="button" className={btnPrimary} disabled={!!busy || appName.trim() === (b.appName ?? '')} onClick={() => void run('app-name', () => ownerApi.update(b.id, { appName }), 'App name saved.')}>{tx("Save app name")}</button>
           {b.appIconId && <button type="button" className={btnGhost} disabled={!!busy} onClick={() => void run('app-icon', () => ownerApi.update(b.id, { appIconId: '' }), 'App now uses the business logo.')}>{tx("Use business logo")}</button>}
           {b.published && !b.suspended && <a className={btnGhost} href={`${bizUrl(b.slug)}?source=app`} target="_blank" rel="noreferrer">{tx("Open customer app")}</a>}
-          {b.published && !b.suspended && b.category !== 'profile' && <button type="button" className={btnPrimary} disabled={!!busy} onClick={() => void run('build-app', () => ownerApi.buildAndroidApp(b.id), 'Android build queued. The business page will offer the APK once it is published.')}>{tx("Build Android APK")}</button>}
+          {canPublishApp && <button type="button" className={btnPrimary} disabled={!!busy || buildStatus !== 'enabled'} onClick={() => void run('build-app', async () => {
+            try { await ownerApi.buildAndroidApp(b.id); }
+            catch (error) {
+              if (error instanceof BizApiError && error.status === 503) setBuildStatus('disabled');
+              throw error;
+            }
+          }, 'Android build queued. The business page will offer the APK once it is published.')}>{tx("Build Android APK")}</button>}
         </div>
+        {canPublishApp && buildStatus === 'disabled' && <p role="status" className="mt-2 text-sm text-[var(--app-muted)]">{tx("Android builds are unavailable until a platform administrator configures the build service.")}</p>}
+        {canPublishApp && buildStatus === 'error' && <p role="status" className="mt-2 text-sm text-[var(--app-muted)]">{tx("Could not check Android build availability. Reopen Settings to try again.")}</p>}
       </div>
       <div className={card}><Title kind="private" hint="For you: suppliers, ideas, reminders. Never shown on your page.">{tx("Private notes")}</Title>
         <textarea className={input} rows={5} maxLength={2000} value={notes} onChange={(e) => setNotes(e.target.value)} /><button type="button" className={`${btnGhost} mt-3`} disabled={notes === b.notes || busy === 'notes'} onClick={() => void run('notes', () => ownerApi.update(b.id, { notes }), 'Notes saved.')}>{tx("Save notes")}</button></div>
