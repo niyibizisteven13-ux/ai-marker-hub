@@ -224,6 +224,8 @@ Object.assign(SRW, {
   'Next code': 'Kode ikurikira',
   'The next meal code will appear here.': 'Kode y’ifunguro ikurikira izagaragara hano.',
   'Available in': 'Iragaragara mu',
+  'Use current meal code': 'Koresha kode y’ifunguro iri gukora',
+  'The current code is applied automatically and stays hidden.': 'Kode iri gukora ikoreshwa ako kanya kandi ntigaragara.',
   'Lunch code: 11:00–14:00. Dinner code: 18:00–22:00, Kigali time. Show the active code to your members at the venue.': 'Kode ya saa sita ikora kuva 11:00–14:00. Iya nimugoroba ikora kuva 18:00–22:00, ku isaha y’i Kigali. Erekana abakiriya kode iri gukora uri aho bakirira.',
   'Customer or cashier scans': 'Umukiriya cyangwa umukozi wo kuri kashi arasikana',
   'Customers scan the business code. The cashier can also scan a customer card.': 'Abakiriya basikana kode y’ubucuruzi. Umukozi wo kuri kashi na we ashobora gusikana ikarita y’umukiriya.',

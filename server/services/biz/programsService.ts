@@ -596,7 +596,7 @@ export function createPrograms(h: Helpers) {
       });
     },
     /** The customer scans the business's rotating code (only when the owner chose self check-in): restaurant check-ins also confirm the customer's passcode. */
-    async selfUse(slug: string, session: string, input: { cardId?: unknown; code?: unknown; item?: unknown; passcode?: unknown; batchId?: unknown; quantity?: unknown; guestRequest?: unknown; mealDate?: unknown }, visitor: string) {
+    async selfUse(slug: string, session: string, input: { cardId?: unknown; code?: unknown; useCurrentCode?: unknown; item?: unknown; passcode?: unknown; batchId?: unknown; quantity?: unknown; guestRequest?: unknown; mealDate?: unknown }, visitor: string) {
       const b = await h.publicLive(slug); if (!b) throw new ProgramError('This page is not available.', 404, 'NOT_FOUND'); const me = await sessionOf(b.id, session);
       const guestRequest = input.guestRequest;
       const quantity = input.quantity === undefined ? 1 : Number(input.quantity);
@@ -615,8 +615,19 @@ export function createPrograms(h: Helpers) {
         if (!cards.length) throw new ProgramError('This card was not found.', 404, 'NOT_FOUND');
         const selfCards = cards.filter((x) => b.category === 'restaurant' || x.p.checkIn === 'self'); if (!selfCards.length) throw new ProgramError('At this business the staff ticks your card. Show your QR code.', 403, 'STAFF_ONLY');
         const t = h.now();
+        let code = input.code;
+        let currentCodeCard: typeof cards[number] | undefined;
+        if (input.useCurrentCode === true) {
+          if (b.category !== 'restaurant' || !cardId) throw new ProgramError('Current meal codes are only available for a selected restaurant card.', 400, 'BAD_CODE');
+          currentCodeCard = cards.find(x => x.m.id === cardId);
+          if (!currentCodeCard) throw new ProgramError('This card was not found.', 404, 'NOT_FOUND');
+          const slot = restaurantCodeWindow(t).active;
+          if (!slot) throw new ProgramError('There is no active meal code right now. Use the code shown at the business during lunch or dinner hours.', 403, 'BAD_CODE');
+          const win = slot.rotates ? Math.floor(t / CODE_WINDOW_MS) : `${slot.date}|${slot.meal.toLowerCase()}`;
+          code = venueCode(b.id, currentCodeCard.p.id + (currentCodeCard.p.codeRevision ?? ''), win);
+        }
         // The customer proves they are at the business by the code it shows: it changes every minute and cannot be guessed.
-        const hit = selfCards.reverse().find(x => venueCodeOk(b.id, x.p.id + (x.p.codeRevision ?? ''), input.code, t, b.category === 'restaurant'));
+        const hit = currentCodeCard ?? selfCards.reverse().find(x => venueCodeOk(b.id, x.p.id + (x.p.codeRevision ?? ''), code, t, b.category === 'restaurant'));
         if (h.tooMany(`tickcode|${b.id}|${me.phone}|${visitor}`, 15, t, 3_600_000, !hit)) throw new ProgramError('Too many wrong codes. Please wait a little.', 429, 'RATE');
         if (!hit) throw new ProgramError('That code is not right, or it has changed. Scan the business\'s code again.', 403, 'BAD_CODE');
         const restaurant = b.category === 'restaurant';

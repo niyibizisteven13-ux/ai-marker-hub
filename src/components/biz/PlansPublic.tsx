@@ -260,6 +260,7 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
   const [typed, setTyped] = useState(''); const [flash, setFlash] = useState('');
   const [camera, setCamera] = useState(false);
   const [confirmationCode, setConfirmationCode] = useState('');
+  const [useCurrentCode, setUseCurrentCode] = useState(false);
   const [scanPasscode, setScanPasscode] = useState('');
   const [checkinError, setCheckinError] = useState('');
   const [mealBox, setMealBox] = useState('');
@@ -291,7 +292,7 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
     return () => { controller.abort(); window.clearTimeout(timer); };
   }, [slug, b.category, card?.cardId, card?.member.state, card?.version]);
   const act = async (fn: (s: string, id: string) => Promise<unknown>) => { const s = session(); if (!s || !card) return; setBusy(true); setErr(''); try { await fn(s, card.cardId); await load(); } catch (e) { fail(e); } finally { setBusy(false); } };
-  async function doTick(code: string, passcode?: string) {
+  async function doTick(code: string, passcode?: string, currentCode = false) {
     const token = session();
     if (!token || checkingIn.current) return;
     checkingIn.current = true;
@@ -300,8 +301,9 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
     setFlash('');
     try {
       const batch = b.category === 'restaurant' ? { batchId, quantity: Number(quantity), item: mealBox || undefined } : undefined;
-      const result = await publicApi.tick(slug, token, code, passcode, batch ? card?.cardId : undefined, batch);
+      const result = await publicApi.tick(slug, token, code, passcode, batch ? card?.cardId : undefined, batch, currentCode);
       setConfirmationCode('');
+      setUseCurrentCode(false);
       setTyped('');
       setSel(result.cardId);
       setFlash(batch ? `${result.item} × ${batch.quantity} · ${tx('ticked')}` : `${result.item} ${tx('ticked')}`);
@@ -320,12 +322,13 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
     }
   }
 
-  function prepareCheckin(code: string, passcode?: string) {
+  function prepareCheckin(code: string, passcode?: string, currentCode = false) {
     setCamera(false);
     setCheckinError('');
     setFlash('');
     if (b.category === 'restaurant' || card?.tick?.requiresPasscode) {
-      setConfirmationCode(code);
+      setConfirmationCode(currentCode ? 'current-code' : code);
+      setUseCurrentCode(currentCode);
       setScanPasscode(passcode ?? '');
       setMealBox(card?.tick?.items.find(option => option.allowed)?.item ?? card?.program.items.find(isFlexibleMeal) ?? '');
       setQuantity('1');
@@ -385,7 +388,7 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
               <div className="space-y-3 rounded-2xl bg-white p-4">
                 <p className="font-display text-lg font-semibold">{card.tick?.needsCode === false ? tx("Meal check-in") : tx("Scan the business's code")}</p>
                 {confirmationCode ? (
-                  <form className="space-y-2" onSubmit={(event) => { event.preventDefault(); if (/^\d{4,6}$/.test(scanPasscode)) void doTick(confirmationCode, scanPasscode); }}>
+                  <form className="space-y-2" onSubmit={(event) => { event.preventDefault(); if (/^\d{4,6}$/.test(scanPasscode)) void doTick(confirmationCode, scanPasscode, useCurrentCode); }}>
                     <label className="block text-sm font-semibold">{tx("Meal box to use")}
                       <select className={field} value={mealBox} onChange={e => setMealBox(e.target.value)}>
                         <option value="">{tx("Current meal")}</option>
@@ -402,7 +405,7 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
                     </label>
                     <div className="flex gap-2">
                       <button type="submit" disabled={busy || scanPasscode.length < 4} style={{ background: theme.accent, color: theme.on }} className="min-h-12 flex-1 rounded-xl px-4 font-semibold disabled:opacity-50">{tx("Confirm check-in")}</button>
-                      <button type="button" disabled={busy} className="min-h-12 rounded-xl border px-4 font-semibold" onClick={() => { setConfirmationCode(''); setScanPasscode(''); setCheckinError(''); }}>{tx("Cancel")}</button>
+                      <button type="button" disabled={busy} className="min-h-12 rounded-xl border px-4 font-semibold" onClick={() => { setConfirmationCode(''); setUseCurrentCode(false); setScanPasscode(''); setCheckinError(''); }}>{tx("Cancel")}</button>
                     </div>
                   </form>
                 ) : m.state === 'active' && card.tick && (
@@ -417,6 +420,10 @@ export function Dashboard({ b, lang, onClose, onSignedOut, programId, initialCar
                       <button type="button" disabled={busy} style={{ background: theme.accent, color: theme.on }} className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl px-4 font-semibold disabled:opacity-50" onClick={() => { setCheckinError(''); setCamera(true); }}><Camera size={19} aria-hidden="true" />{tx("Scan QR code")}</button>
                     )}
                     {camera && scanner.error && <p role="alert" className="text-sm text-rose-700">{scanner.error}</p>}
+                    {b.category === 'restaurant' && <div>
+                      <button type="button" disabled={busy} className="min-h-12 w-full rounded-xl border px-4 font-semibold disabled:opacity-50" onClick={() => prepareCheckin('', undefined, true)}>{tx('Use current meal code')}</button>
+                      <p className="mt-1 text-center text-xs text-[#5B6470]">{tx('The current code is applied automatically and stays hidden.')}</p>
+                    </div>}
                     <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); if (/^\d{6}$/.test(typed)) prepareCheckin(typed); }}>
                       <input className={`${field} !mt-0 font-mono text-xl tracking-[0.3em]`} value={typed} onChange={(event) => setTyped(event.target.value.replace(/\D/g, '').slice(0, 6))} inputMode="numeric" maxLength={6} placeholder={tx("6-digit code")} aria-label={tx('Code shown at the business')} />
                       <button type="submit" disabled={busy || typed.length !== 6} className="min-h-12 shrink-0 rounded-xl border px-4 font-semibold disabled:opacity-50">{tx('Use code')}</button>

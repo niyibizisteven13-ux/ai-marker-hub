@@ -503,6 +503,20 @@ test('restaurant cards require a venue code and personal passcode', async () => 
   await assert.rejects(selfScan(svc, biz.slug, j.session, { code: await codeOf(svc, biz.id, prog.id) }, 'e'), (e: any) => /All 3 uses/.test(e.message), 'the total cap holds');
 });
 
+test('a restaurant member can use the current hidden meal code from their dashboard only during its meal window', async () => {
+  const { svc, biz, prog, at } = await setup({ items: ['Lunch', 'Dinner'], totalUses: 3 });
+  const customer = await joinP(svc, biz.slug, prog.id, { name: 'Current code', phone: '0788300050' }, 'current-code');
+  await svc.confirmPayment('o', biz.id, customer.cardId, { method: 'cash' });
+  await assert.rejects(svc.selfUse(biz.slug, customer.session, { cardId: customer.cardId, useCurrentCode: true }, 'current-code'), { code: 'PASSCODE_REQUIRED' });
+  const lunch = await svc.selfUse(biz.slug, customer.session, { cardId: customer.cardId, useCurrentCode: true, passcode: '4821' }, 'current-code');
+  assert.equal(lunch.item, 'Lunch');
+  at(Date.parse('2026-11-17T12:00:00Z'));
+  await assert.rejects(svc.selfUse(biz.slug, customer.session, { cardId: customer.cardId, useCurrentCode: true, passcode: '4821' }, 'current-code'), { code: 'BAD_CODE' });
+  at(Date.parse('2026-11-17T16:00:00Z'));
+  const dinner = await svc.selfUse(biz.slug, customer.session, { cardId: customer.cardId, useCurrentCode: true, passcode: '4821' }, 'current-code');
+  assert.equal(dinner.item, 'Dinner');
+});
+
 test('non-restaurant customer scan codes change every minute and are different for every program', async () => {
   const { svc, biz, prog, at } = await setup({ checkIn: 'self' }); const other = await svc.saveProgram('o', biz.id, { ...LUNCH, title: 'Second', checkIn: 'self' });
   await svc.update('o', biz.id, { category: 'services' });
