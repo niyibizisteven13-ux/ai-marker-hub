@@ -219,6 +219,12 @@ Object.assign(SRW, {
 Object.assign(SRW, {
   'Check-in code': 'Kode yo kwemeza',
   'New code in': 'Kode nshya mu',
+  'Code available for': 'Kode iraboneka mu gihe gisigaye',
+  'No meal code is active now.': 'Nta kode y’ifunguro ikora ubu.',
+  'Next code': 'Kode ikurikira',
+  'The next meal code will appear here.': 'Kode y’ifunguro ikurikira izagaragara hano.',
+  'Available in': 'Iragaragara mu',
+  'Lunch code: 11:00–14:00. Dinner code: 18:00–22:00, Kigali time. Show the active code to your members at the venue.': 'Kode ya saa sita ikora kuva 11:00–14:00. Iya nimugoroba ikora kuva 18:00–22:00, ku isaha y’i Kigali. Erekana abakiriya kode iri gukora uri aho bakirira.',
   'Customer or cashier scans': 'Umukiriya cyangwa umukozi wo kuri kashi arasikana',
   'Customers scan the business code. The cashier can also scan a customer card.': 'Abakiriya basikana kode y’ubucuruzi. Umukozi wo kuri kashi na we ashobora gusikana ikarita y’umukiriya.',
   'The customer scans': 'Umukiliya arasikana',

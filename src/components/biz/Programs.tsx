@@ -75,18 +75,20 @@ export function ProgramsView({ b, onChange }: { b: Business; onChange: () => voi
 }
 
 /* ---------- Today: scan a pass, or type a code ---------- */
-/** The code the business shows for customers who tick their own card by scanning: a QR code and 6 digits that change every minute. */
+/** The code the business shows for customers who tick their own card by scanning. */
 function CheckinCode({ b, programs, revisions }: { b: Business; programs: ProgramInfo[]; revisions?: Record<string, string> }) {
-  const { t } = useWords(b); const [pid, setPid] = useState(programs[0]?.id ?? ''); const [c, setC] = useState<{ code: string; expiresInSec: number } | null>(null); const [err, setErr] = useState(''); const [left, setLeft] = useState(0);
+  const { t } = useWords(b); const [pid, setPid] = useState(programs[0]?.id ?? ''); const [c, setC] = useState<{ code: string | null; expiresInSec: number; meal?: string; window?: { from: string; to: string }; nextMeal?: string; nextAt?: string; rotates?: boolean } | null>(null); const [err, setErr] = useState(''); const [left, setLeft] = useState(0);
   const revision = revisions?.[pid] ?? '';
   const [rotating, setRotating] = useState(false);
   useEffect(() => { let on = true; let timer = 0; const run = async () => { setC(null); try { const r = await ownerApi.checkinCode(b.id, pid); if (!on) return; setC(r); setLeft(r.expiresInSec); setErr(''); timer = window.setTimeout(run, Math.max(1, r.expiresInSec) * 1000); } catch (e) { if (on) { setErr(msg(e)); timer = window.setTimeout(run, 15_000); } } }; void run(); return () => { on = false; window.clearTimeout(timer); }; }, [b.id, pid, revision]);
   useEffect(() => { const i = window.setInterval(() => setLeft((v) => Math.max(0, v - 1)), 1000); return () => window.clearInterval(i); }, []);
-  const url = c ? `${window.location.origin}/b/${b.slug}?plan=${encodeURIComponent(pid)}&tick=${c.code}` : '';
+  const url = c?.code ? `${window.location.origin}/b/${b.slug}?plan=${encodeURIComponent(pid)}&tick=${c.code}` : '';
   return (
     <section className={`${card} space-y-3 text-center lg:col-span-2`} aria-label={tx("Check-in code")}>
       <Title>{tx("Check-in code")}</Title>
-      <p className="text-sm text-[var(--app-muted)]">{t("Show this where your {members} can see it. They scan it with their phone camera (or type the digits) to start check-in. It changes every minute, so a photo of it does not work later.")}</p>
+      <p className="text-sm text-[var(--app-muted)]">{b.category === 'restaurant'
+        ? tx("Lunch code: 11:00–14:00. Dinner code: 18:00–22:00, Kigali time. Show the active code to your members at the venue.")
+        : t("Show this where your {members} can see it. They scan it with their phone camera (or type the digits) to start check-in. It changes every minute, so a photo of it does not work later.")}</p>
       {programs.length > 1 && <div className="flex flex-wrap justify-center gap-2" role="tablist">{programs.map((p) => <button key={p.id} type="button" role="tab" aria-selected={pid === p.id} onClick={() => { setPid(p.id); setC(null); }} className={`${pid === p.id ? btnPrimary : btnGhost} !min-h-9 !px-3 text-sm`}>{p.title}</button>)}</div>}
       {b.category === 'restaurant' && <button type="button" className={btnGhost} disabled={rotating} onClick={async () => {
         setRotating(true);
@@ -95,7 +97,14 @@ function CheckinCode({ b, programs, revisions }: { b: Business; programs: Progra
         finally { setRotating(false); }
       }}>{tx("Change code now")}</button>}
       {err && <p role="alert" className="text-sm text-rose-600"><AlertTriangle size={14} className="mr-1 inline" />{err}</p>}
-      {c ? <div className="mx-auto w-fit"><QrImage key={url} text={url} size={220} /><p className="mt-2 font-mono text-4xl font-semibold tracking-[0.25em]" aria-live="off">{c.code.slice(0, 3)} {c.code.slice(3)}</p><p className="text-xs text-[var(--app-muted)]">{tx("New code in")} {left}s</p></div> : !err && <Loader2 className="mx-auto animate-spin" aria-label={tx("Loading")} />}
+      {c?.code ? <div className="mx-auto w-fit"><QrImage key={url} text={url} size={220} /><p className="mt-2 font-mono text-4xl font-semibold tracking-[0.25em]" aria-live="off">{c.code.slice(0, 3)} {c.code.slice(3)}</p>
+        {c.meal && <p className="text-sm font-semibold">{c.meal}{c.window ? ` · ${c.window.from}–${c.window.to} Kigali time` : ''}</p>}
+        <p className="text-xs text-[var(--app-muted)]">{c.rotates ? tx("New code in") : tx("Code available for")} {left}s</p>
+      </div> : c ? <div className="mx-auto max-w-sm rounded-xl bg-[var(--app-bg)] p-4 text-sm">
+        <p className="font-semibold">{tx("No meal code is active now.")}</p>
+        <p className="mt-1">{c.nextMeal ? `${tx("Next code")}: ${c.nextMeal} · ${c.nextAt} Kigali time` : tx("The next meal code will appear here.")}</p>
+        <p className="mt-1 text-[var(--app-muted)]">{tx("Available in")} {left}s</p>
+      </div> : !err && <Loader2 className="mx-auto animate-spin" aria-label={tx("Loading")} />}
     </section>
   );
 }

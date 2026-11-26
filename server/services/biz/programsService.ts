@@ -7,7 +7,7 @@ import type { Business, PublicBusiness } from './model.js';
 import type { LedgerEntry } from './ledger.js';
 import type { ProgramDay } from './report.js';
 import {
-  LOCK_MINUTES, MAX_MEMBERS, MAX_PIN_FAILS, MAX_PROGRAMS, REMEMBER_DAYS, SESSION_HOURS, addDays, canServe, cardCalendar, cleanJoin, cleanProgram, cleanProgramText, hashPasscode, hashSession, newJoinCode, cleanUsername, validUsername, suggestUsernames, newSalt, sameCode, validPasscode, cleanStart, dayOfWeek, endDateFor, hashToken, kigaliDate, newCode, newToken, normalizeCode,
+  LOCK_MINUTES, MAX_MEMBERS, MAX_PIN_FAILS, MAX_PROGRAMS, REMEMBER_DAYS, SESSION_HOURS, addDays, canServe, cardCalendar, cleanJoin, cleanProgram, cleanProgramText, hashPasscode, hashSession, newJoinCode, cleanUsername, validUsername, suggestUsernames, newSalt, sameCode, validPasscode, cleanStart, dayOfWeek, endDateFor, hashToken, kigaliDate, kigaliMinutes, newCode, newToken, normalizeCode,
   oneOfMethod, planState, remaining, restaurantMealAt, tokenFromPayload, usesLeft, withRestaurantMealHours, type DenyCode, type Use, type Member, type PlanState, type Program,
 } from './programs.js';
 
@@ -70,8 +70,14 @@ export interface MemberView {
 export interface PublicProgram { checkIn: 'staff' | 'self'; needsCode: boolean; id: string; title: string; description?: string; priceRwf: number; days: number; items: string[]; openDays: Program['openDays']; windows?: Program['windows']; terms?: string; full: boolean }
 
 const SELF_UNDO_MS = 60_000;
-/** The business's check-in code changes every minute, so a photo of it is useless a little later. The previous one is still accepted, for a slow scan. */
+/** Non-restaurant codes and breakfast codes rotate every minute. */
 const CODE_WINDOW_MS = 60_000;
+const KIGALI_OFFSET_MS = 2 * 60 * 60_000;
+const RESTAURANT_CODE_WINDOWS = [
+  { meal: 'Breakfast', from: 6 * 60, to: 10 * 60, rotates: true },
+  { meal: 'Lunch', from: 11 * 60, to: 14 * 60, rotates: false },
+  { meal: 'Dinner', from: 18 * 60, to: 22 * 60, rotates: false },
+] as const;
 export function createPrograms(h: Helpers) {
   const { kv } = h;
   const k = { programs: (b: string) => `biz-programs:${b}`, members: (b: string) => `biz-members:${b}`, pass: (hash: string) => `biz-pass:${hash}`, uses: (b: string, m: string) => `biz-uses:${b}:${m}`, served: (b: string, d: string) => `biz-served:${b}:${d}`, days: (b: string) => `biz-served-days:${b}`, people: (b: string) => `biz-people:${b}`, sess: (hash: string) => `biz-sess:${hash}`, sessions: (b: string) => `biz-sessions:${b}` };
@@ -135,12 +141,45 @@ export function createPrograms(h: Helpers) {
     mealChanged(`card:${bizId}:${m.id}`);
     return uses[0];
   }
-  /** The 6-digit check-in code a business shows for one program in a given minute: an HMAC of the program and the minute, with a key only the server has. */
-  const venueCode = (bizId: string, programId: string, win: number) => String(createHmac('sha256', h.secretKey()).update(`checkin|${bizId}|${programId}|${win}`).digest().readUInt32BE(0) % 1_000_000).padStart(6, '0');
-  const venueCodeOk = (bizId: string, programId: string, given: unknown, t: number) => {
-    const g = String(given ?? '').replace(/\D/g, ''); if (g.length !== 6) return false; const win = Math.floor(t / CODE_WINDOW_MS); let ok = false;
-    for (const w of [win, win - 1]) { const a = Buffer.from(venueCode(bizId, programId, w)); const b = Buffer.from(g); if (a.length === b.length && timingSafeEqual(a, b)) ok = true; }
-    return ok;
+  /** Meal-window codes are scoped to a Kigali date and meal; breakfast and non-restaurant codes keep minute rotation. */
+  const venueCode = (bizId: string, programId: string, win: number | string) => String(createHmac('sha256', h.secretKey()).update(`checkin|${bizId}|${programId}|${win}`).digest().readUInt32BE(0) % 1_000_000).padStart(6, '0');
+  function restaurantCodeWindow(t: number) {
+    const date = kigaliDate(t);
+    const minutes = kigaliMinutes(t);
+    const midnight = Date.parse(`${date}T00:00:00Z`) - KIGALI_OFFSET_MS;
+    for (const window of RESTAURANT_CODE_WINDOWS) {
+      if (minutes >= window.from && minutes < window.to) {
+        return {
+          active: { ...window, date, startsAt: midnight + window.from * 60_000, endsAt: midnight + window.to * 60_000 },
+          next: undefined,
+        };
+      }
+    }
+    const next = [...RESTAURANT_CODE_WINDOWS]
+      .flatMap(window => [
+        { ...window, date, startsAt: midnight + window.from * 60_000 },
+        { ...window, date: addDays(date, 1), startsAt: midnight + 86_400_000 + window.from * 60_000 },
+      ])
+      .filter(window => window.startsAt > t)
+      .sort((a, b) => a.startsAt - b.startsAt)[0];
+    return { active: undefined, next };
+  }
+  function matchesVenueCode(bizId: string, programId: string, given: unknown, windows: Array<number | string>) {
+    const g = String(given ?? '').replace(/\D/g, ''); if (g.length !== 6) return false;
+    const b = Buffer.from(g);
+    return windows.some(win => {
+      const a = Buffer.from(venueCode(bizId, programId, win));
+      return a.length === b.length && timingSafeEqual(a, b);
+    });
+  }
+  const venueCodeOk = (bizId: string, programId: string, given: unknown, t: number, restaurant: boolean) => {
+    if (restaurant) {
+      const slot = restaurantCodeWindow(t).active;
+      if (!slot) return false;
+      if (!slot.rotates) return matchesVenueCode(bizId, programId, given, [`${slot.date}|${slot.meal.toLowerCase()}`]);
+    }
+    const win = Math.floor(t / CODE_WINDOW_MS);
+    return matchesVenueCode(bizId, programId, given, [win, win - 1]);
   };
   /** What the customer may tap on their own card right now (only for programs the owner set to self check-in): each item, whether it can be ticked, and why not. */
   function tickOptions(m: Member, p: Program, own: Use[], t: number) {
@@ -297,7 +336,7 @@ export function createPrograms(h: Helpers) {
       });
     },
     /** Scan (token) or type (code) a pass: the system says whether this person may be served now, and records the item. */
-    /** The code the business shows right now for a program that customers tick by scanning (it changes every minute). */
+    /** The code the business shows right now for a program that customers tick by scanning. */
     async rotateMealCode(ownerId: string, id: string, programId: string) {
       const b = await h.mine(ownerId, id);
       return withLock(`prog|${id}`, async () => {
@@ -310,10 +349,25 @@ export function createPrograms(h: Helpers) {
         return { ok: true };
       });
     },
-    async checkinCode(ownerId: string, id: string, programId: string): Promise<{ code: string; expiresInSec: number; program: string }> {
+    async checkinCode(ownerId: string, id: string, programId: string): Promise<{ code: string | null; expiresInSec: number; program: string; meal?: string; window?: { from: string; to: string }; nextMeal?: string; nextAt?: string; rotates?: boolean }> {
       const b = await h.mine(ownerId, id); const p = (await programsOf(b.id)).find((x) => x.id === programId); if (!p) throw new ProgramError('That program was not found.', 404, 'NOT_FOUND');
       if (b.category !== 'restaurant' && p.checkIn !== 'self') throw new ProgramError('This program is ticked by your staff. Turn on "The customer scans" in the program to use a check-in code.', 409, 'STAFF_ONLY');
-      const t = h.now(); const win = Math.floor(t / CODE_WINDOW_MS); return { code: venueCode(b.id, p.id + (p.codeRevision ?? ''), win), expiresInSec: Math.max(1, Math.ceil(((win + 1) * CODE_WINDOW_MS - t) / 1000)), program: p.title };
+      const t = h.now();
+      if (b.category === 'restaurant') {
+        const { active, next } = restaurantCodeWindow(t);
+        if (!active && next) return { code: null, expiresInSec: Math.max(1, Math.ceil((next.startsAt - t) / 1000)), program: p.title, nextMeal: next.meal, nextAt: `${String(Math.floor(next.from / 60)).padStart(2, '0')}:00` };
+        if (active && !active.rotates) {
+          const win = `${active.date}|${active.meal.toLowerCase()}`;
+          return { code: venueCode(b.id, p.id + (p.codeRevision ?? ''), win), expiresInSec: Math.max(1, Math.ceil((active.endsAt - t) / 1000)), program: p.title, meal: active.meal, window: { from: `${String(Math.floor(active.from / 60)).padStart(2, '0')}:00`, to: `${String(Math.floor(active.to / 60)).padStart(2, '0')}:00` } };
+        }
+        if (active) {
+          const win = Math.floor(t / CODE_WINDOW_MS);
+          const expiry = Math.min((win + 1) * CODE_WINDOW_MS, active.endsAt);
+          return { code: venueCode(b.id, p.id + (p.codeRevision ?? ''), win), expiresInSec: Math.max(1, Math.ceil((expiry - t) / 1000)), program: p.title, meal: active.meal, rotates: true };
+        }
+      }
+      const win = Math.floor(t / CODE_WINDOW_MS);
+      return { code: venueCode(b.id, p.id + (p.codeRevision ?? ''), win), expiresInSec: Math.max(1, Math.ceil(((win + 1) * CODE_WINDOW_MS - t) / 1000)), program: p.title, rotates: true };
     },
     async verifyMeal(ownerId: string, id: string, input: { token?: unknown; code?: unknown }) {
       const b = await h.mine(ownerId, id);
@@ -562,7 +616,7 @@ export function createPrograms(h: Helpers) {
         const selfCards = cards.filter((x) => b.category === 'restaurant' || x.p.checkIn === 'self'); if (!selfCards.length) throw new ProgramError('At this business the staff ticks your card. Show your QR code.', 403, 'STAFF_ONLY');
         const t = h.now();
         // The customer proves they are at the business by the code it shows: it changes every minute and cannot be guessed.
-        const hit = selfCards.reverse().find(x => venueCodeOk(b.id, x.p.id + (x.p.codeRevision ?? ''), input.code, t));
+        const hit = selfCards.reverse().find(x => venueCodeOk(b.id, x.p.id + (x.p.codeRevision ?? ''), input.code, t, b.category === 'restaurant'));
         if (h.tooMany(`tickcode|${b.id}|${me.phone}|${visitor}`, 15, t, 3_600_000, !hit)) throw new ProgramError('Too many wrong codes. Please wait a little.', 429, 'RATE');
         if (!hit) throw new ProgramError('That code is not right, or it has changed. Scan the business\'s code again.', 403, 'BAD_CODE');
         const restaurant = b.category === 'restaurant';
