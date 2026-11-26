@@ -69,6 +69,7 @@ export interface Program {
   mealColors?: Record<string, string> | null;
   stampImage?: string;
   shuffleCardColor?: boolean;
+  tickMinutes?: number;
   cardColor?: string;
   arrivalColor?: string;
   linkCheckIn?: boolean;
@@ -111,7 +112,7 @@ export interface Member {
   note?: string;
   createdAt: string;
 }
-export interface Use { id: string; memberId: string; date: string; item: string; at: string; by: 'scan' | 'code' | 'self'; undone?: boolean; guestRequest?: string; batchId?: string; stampImage?: string }
+export interface Use { doubleTickAt?: number; cellDate?: string; id: string; memberId: string; date: string; item: string; at: string; by: 'scan' | 'code' | 'self'; undone?: boolean; guestRequest?: string; batchId?: string; stampImage?: string }
 
 /* ---------------------------------------------------------------- dates (Kigali, UTC+2) */
 const KIGALI_MS = 2 * 3600_000;
@@ -201,6 +202,11 @@ export function cleanProgram(input: any, id: string, now: string, prev?: Program
     p.stampImage = stamp;
   }
   if ((input?.shuffleCardColor ?? prev?.shuffleCardColor) === true) p.shuffleCardColor = true;
+  const tickMinutes = input?.tickMinutes === undefined ? prev?.tickMinutes : input.tickMinutes;
+  if (tickMinutes !== undefined) {
+    if (!Number.isInteger(tickMinutes) || tickMinutes < 1 || tickMinutes > 1440) return { error: 'Choose a whole number of minutes from 1 to 1440.' };
+    p.tickMinutes = tickMinutes;
+  }
   for (const key of ['cardColor', 'arrivalColor'] as const) {
     const value = input?.[key] ?? prev?.[key];
     if (value && !/^#[a-f0-9]{6}$/i.test(value)) return { error: 'Choose a valid card color.' };
@@ -370,7 +376,7 @@ export const SESSION_HOURS = 12, REMEMBER_DAYS = 30, MAX_PIN_FAILS = 5, LOCK_MIN
 
 /** One row of the card: a calendar day of the plan with whether it is available and what was used that day. */
 export interface CardDay { date: string; dow: Day; open: boolean; used: string[] }
-export function cardCalendar(m: Pick<Member, 'startDate' | 'endDate'>, p: Pick<Program, 'openDays'>, uses: Array<{ date: string; item: string }>, cap = 124): CardDay[] {
+export function cardCalendar(m: Pick<Member, 'startDate' | 'endDate'>, p: Pick<Program, 'openDays'>, uses: Array<{ date: string; item: string }>, cap = MAX_PROGRAM_DAYS): CardDay[] {
   const by = new Map<string, string[]>(); for (const u of uses) by.set(u.date, [...(by.get(u.date) ?? []), u.item]);
   const out: CardDay[] = [];
   for (let d = m.startDate; d <= m.endDate && out.length < cap; d = addDays(d, 1)) out.push({ date: d, dow: dayOfWeek(d), open: p.openDays.includes(dayOfWeek(d)), used: by.get(d) ?? [] });

@@ -612,7 +612,7 @@ test('restaurant guest servings count individually, respect the cap and replay s
   await assert.rejects(tick(key(3)), { code: 'DENIED' });
   const card = await svc.memberCard('o', biz.id, customer.cardId);
   assert.equal(card.member.usedTotal, 3);
-  assert.deepEqual(card.calendar.find(day => day.date === card.today.date)?.used, ['Lunch','Lunch','Lunch']);
+  assert.deepEqual(card.calendar.filter(day => day.used.length).map(day => day.used), [['Lunch'], ['Lunch'], ['Lunch']]);
   assert.equal(card.history.filter(u => u.guest).length, 2);
   assert.equal((await svc.today('o', biz.id)).notYet.length, 1);
   await svc.undoUse('o', biz.id, two.useId);
@@ -636,11 +636,11 @@ test('an uncapped link card accepts a group during lunch and stops when lunch en
   await assert.rejects(extra(21), { code: 'DENIED' });
 });
 
-test('group check-in counts plates once and the serving receipt expires at five minutes', async () => {
-  const { svc, biz, prog, at } = await setup({ totalUses: 4 });
+test('group check-in counts plates once and the serving receipt expires at two minutes', async () => {
+  const { svc, biz, prog, at } = await setup({ totalUses: 6 });
   const member = await joinP(svc, biz.slug, prog.id, { name: 'Host', phone: '0788000021' }, 'batch');
   await svc.confirmPayment('o', biz.id, member.cardId, { method: 'cash' });
-  const input = { code: await codeOf(svc, biz.id, prog.id), passcode: '4821', quantity: 3, batchId: '00000000-0000-4000-8000-000000000010' };
+  const input = { code: await codeOf(svc, biz.id, prog.id), passcode: '4821', quantity: 5, batchId: '00000000-0000-4000-8000-000000000010' };
   const tick = () => svc.selfUse(biz.slug, member.session, input, 'batch');
   await assert.rejects(svc.rotateMealCode('other', biz.id, prog.id));
   await svc.rotateMealCode('o', biz.id, prog.id);
@@ -649,16 +649,21 @@ test('group check-in counts plates once and the serving receipt expires at five 
   const before = await svc.today('o', biz.id);
   const watching = svc.today('o', biz.id, before.version);
   await Promise.all([tick(), tick()]);
-  assert.equal((await watching).servedCount, 3);
+  assert.equal((await watching).servedCount, 5);
   const card = () => svc.card(biz.slug, member.session);
-  assert.equal((await card()).today.receipt?.count, 3);
-  assert.equal((await card()).history.filter(u => u.guest).length, 2);
+  assert.equal((await card()).today.receipt?.count, 5);
+  assert.equal((await card()).history.filter(u => u.guest).length, 4);
   input.batchId = '00000000-0000-4000-8000-000000000011';
   await assert.rejects(tick(), { code: 'DENIED' });
-  assert.equal((await card()).member.usedTotal, 3);
-  at(T0 + 300_000);
+  assert.equal((await card()).member.usedTotal, 5);
+  const filled = (await card()).calendar.filter(day => day.used.length);
+  assert.deepEqual(filled.map(day => day.used), Array.from({ length: 5 }, () => ['Lunch']));
+  assert.equal(new Set((await card()).history.map(use => use.at)).size, 1);
+  at(T0 + 119_999);
+  assert.equal((await card()).today.receipt?.count, 5);
+  at(T0 + 120_000);
   assert.equal((await card()).today.receipt, undefined);
-  assert.equal((await card()).history.length, 3);
+  assert.equal((await card()).history.length, 5);
 });
 
 test('owner can record from a card code or saved QR and wake the open client card', async () => {
@@ -682,4 +687,40 @@ test('owner can record from a card code or saved QR and wake the open client car
     await svc.undoUse('o', biz.id, result.useId);
     assert.equal((await open()).member.usedTotal, 0);
   }
+});
+
+test('owner timer applies to new servings and preserves existing deadlines', async () => {
+  const {svc, biz, prog, at} = await setup();
+  await assert.rejects(svc.saveProgram('o', biz.id, {id:prog.id, tickMinutes:0}));
+  await svc.saveProgram('o', biz.id, {id:prog.id, tickMinutes:3});
+  const member = await joinP(svc,biz.slug,prog.id,{name:'Timer',phone:'0788234432'},'timer');
+  await svc.confirmPayment('o',biz.id,member.cardId,{method:'cash'});
+  await svc.redeem('o',biz.id,{code:member.code});
+  const card = () => svc.card(biz.slug,member.session);
+  assert.equal((await card()).history[0].doubleTickAt,T0 + 180_000);
+  await svc.saveProgram('o',biz.id,{id:prog.id,tickMinutes:1});
+  at(T0+120_000);
+  assert.ok((await card()).today.receipt);
+  at(T0+180_000);
+  assert.equal((await card()).today.receipt,undefined);
+});
+
+test('restaurant client can use dinner boxes at lunch and lunch boxes at dinner', async () => {
+  const { svc, biz, prog, at } = await setup({ items: ['Breakfast','Lunch','Dinner'], totalUses: 3 });
+  const member = await joinP(svc,biz.slug,prog.id,{name:'Flexible',phone:'0788134432'},'flex');
+  await svc.confirmPayment('o',biz.id,member.cardId,{method:'cash'});
+  const tick = async (item: string, quantity: number, suffix: number) => svc.selfUse(biz.slug,member.session,{
+    code:await codeOf(svc,biz.id,prog.id),passcode:'4821',cardId:member.cardId,item,quantity,
+    batchId:'00000000-0000-4000-8000-'+String(suffix).padStart(12,'0'),
+  },'flex');
+  await assert.rejects(tick('Breakfast',1,1));
+  await assert.rejects(tick('Supper',1,2));
+  await tick('Dinner',2,3);
+  const lunchVisit = await svc.card(biz.slug,member.session);
+  assert.equal(lunchVisit.today.receipt?.item,'Dinner');
+  assert.equal(lunchVisit.calendar.filter(d=>d.used.includes('Dinner')).length,2);
+  at(Date.parse('2026-11-17T17:00:00Z'));
+  await tick('Lunch',1,4);
+  await assert.rejects(tick('Dinner',1,5));
+  assert.equal((await svc.card(biz.slug,member.session)).member.usedTotal,3);
 });

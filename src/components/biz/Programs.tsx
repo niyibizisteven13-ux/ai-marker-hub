@@ -1,5 +1,5 @@
 import { CardWatermark, PaperCard } from './PlansPublic';
-import { mealColor, mealColorKey, mealInk, restaurantCard, cardPaper, dailyMealPaper } from '../../../server/services/biz/mealCard';
+import { isFlexibleMeal, mealColor, mealColorKey, mealInk, restaurantCard, cardPaper, dailyMealPaper } from '../../../server/services/biz/mealCard';
 import { useScanner } from './useScanner';
 import { getStudioLang, tx } from '../../biz/studioI18n';
 import { RW_WORDS, fill, wordsOf } from '../../../server/services/biz/programWords';
@@ -102,6 +102,7 @@ function CheckinCode({ b, programs, revisions }: { b: Business; programs: Progra
 
 function TodayTab({ b, hasPlans, selfPrograms, onChange, goPlans }: { b: Business; hasPlans: boolean; selfPrograms: ProgramInfo[]; onChange: () => void; goPlans: () => void }) {
   const { w, t } = useWords(b);
+  const [mealBox, setMealBox] = useState('');
   const [recordMeal, setRecordMeal] = useState(false);
   const [camera, setCamera] = useState(false); const [code, setCode] = useState(''); const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<(RedeemResult & { token?: string }) | null>(null); const [today, setToday] = useState<TodayInfo | null>(null); const [err, setErr] = useState('');
@@ -129,8 +130,8 @@ function TodayTab({ b, hasPlans, selfPrograms, onChange, goPlans }: { b: Busines
   }, [b.id]);
   const redeem = useCallback(async (body: { token?: string; code?: string; memberId?: string; force?: boolean; item?: string }) => {
     if (busy) return; setBusy(true);
-    try { const r = b.category === 'restaurant' && !recordMeal ? await ownerApi.verifyMeal(b.id, body) : await ownerApi.redeem(b.id, body); setResult({ ...r, token: body.token }); signal(r.ok); setCode(''); void loadToday(); onChange(); } catch (e) { setErr(msg(e)); } finally { setBusy(false); }
-  }, [b.id, b.category, recordMeal, busy, loadToday, onChange]);
+    try { const r = b.category === 'restaurant' && !recordMeal ? await ownerApi.verifyMeal(b.id, body) : await ownerApi.redeem(b.id, recordMeal && mealBox ? { ...body, item: mealBox } : body); setResult({ ...r, token: body.token }); signal(r.ok); setCode(''); void loadToday(); onChange(); } catch (e) { setErr(msg(e)); } finally { setBusy(false); }
+  }, [b.id, b.category, recordMeal, mealBox, busy, loadToday, onChange]);
   const scanner = useScanner(camera && !result, (text) => { void redeem({ token: text }); }, tx);
   if (!hasPlans) return <div className={card}><p className="text-sm">{t("Make your first {program} to get started.")}</p><button type="button" className={`${btnPrimary} mt-3`} onClick={goPlans}><Plus size={16} />{t("Create a {program}")}</button></div>;
   const m = result?.member;
@@ -151,6 +152,12 @@ function TodayTab({ b, hasPlans, selfPrograms, onChange, goPlans }: { b: Busines
             {write ? tx("Record a meal") : tx("Verify receipt")}
           </button>)}
         </div>}
+        {b.category === 'restaurant' && recordMeal && <label className="block text-sm">{tx("Meal box to use")}
+          <select className={input} value={mealBox} onChange={e => setMealBox(e.target.value)}>
+            <option value="">{tx("Current meal")}</option>
+            {[...new Set(selfPrograms.flatMap(p => p.items.filter(isFlexibleMeal)))].map(item => <option key={item}>{item}</option>)}
+          </select>
+        </label>}
         {b.category === 'restaurant' && recordMeal && <p className="text-sm">{tx("Scan the client’s card QR, including a screenshot, or enter their card code to record one meal.")}</p>}
         {result ? (
           <div role="status" aria-live="polite" className={`rounded-2xl p-5 text-center ${result.ok ? 'bg-emerald-500/15' : 'bg-rose-500/12'}`}>
@@ -419,6 +426,9 @@ function PlansTab({ b, programs, onChange }: { b: Business; programs: ProgramInf
             setItemText(undefined);
             set({ ...restaurantCard, cardLayout: { ...layout, hiddenItems: [] } });
           }}>{tx("Use three-meal restaurant card")}</button>}
+          {restaurant && <label className="block text-sm font-medium">{tx("Minutes before a single check becomes a double check")}
+            <input className={`${input} mt-1 !w-32`} type="number" inputMode="numeric" min={1} max={1440} step={1} required value={Number.isNaN(edit.tickMinutes) ? '' : edit.tickMinutes ?? 2} onChange={e => set({ tickMinutes: e.target.value ? Number(e.target.value) : NaN })} />
+          </label>}
           <label className="block text-sm font-medium">{tx("What they get each day (separate with commas, for example Lunch or Entry)")}<input className={`${input} mt-1`} value={itemText ?? (edit.items ?? []).join(', ')} onChange={(event) => {
             const text = event.target.value;
             setItemText(text);

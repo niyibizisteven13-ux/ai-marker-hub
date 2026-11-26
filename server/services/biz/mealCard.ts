@@ -1,3 +1,9 @@
+export const isFlexibleMeal = (item: string) => ['lunch', 'dinner', 'supper'].includes(item.trim().toLowerCase());
+export const DEFAULT_TICK_MINUTES = 2;
+export function tickDeadline(use: { at: string; doubleTickAt?: number }) {
+  return use.doubleTickAt ?? Date.parse(use.at) + DEFAULT_TICK_MINUTES * 60_000;
+}
+
 export const restaurantWindows = [
   { item: 'Breakfast', from: '06:00', to: '10:00' },
   { item: 'Lunch', from: '11:00', to: '15:00' },
