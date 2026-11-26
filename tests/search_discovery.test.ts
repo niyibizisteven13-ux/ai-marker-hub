@@ -22,6 +22,8 @@ test('discovery sitemap lists distinct canonical public routes and validates ent
 
 test('business shell removes homepage metadata and escapes owner text', () => {
   const business = publicView(newBusiness('id', 'owner', 'A <Cafe> $&', 'demo-cafe', 'restaurant', updated.toISOString()));
+  business.contact.address = 'Kigali & Kimihurura';
+  business.hours = [{ day: 'mon', open: '09:00', close: '18:00' }, { day: 'sun', open: '00:00', close: '00:00', closed: true }];
   const html = renderShell(base, business, SITE_ORIGIN);
   assert.equal(html.match(/rel="canonical"/g)?.length, 1);
   assert.equal(html.match(/property="og:title"/g)?.length, 1);
@@ -30,6 +32,11 @@ test('business shell removes homepage metadata and escapes owner text', () => {
   assert.doesNotMatch(html, /SoftwareApplication|Explore Rwanda’s data/);
   assert.match(html, /"@type":"Restaurant"/);
   assert.match(html, /manifest\.webmanifest/);
+  assert.match(html, /<address>Kigali &amp; Kimihurura<\/address>/);
+  assert.match(html, /Monday: 09:00–18:00/);
+  assert.match(html, /Sunday: Closed/);
+  assert.match(html, /"openingHoursSpecification":\[\{"@type":"OpeningHoursSpecification","dayOfWeek":"https:\/\/schema.org\/Monday"/);
+  assert.doesNotMatch(html, /schema.org\/Sunday/);
 });
 
 test('research paper preview replaces site metadata and keeps a crawlable abstract', () => {

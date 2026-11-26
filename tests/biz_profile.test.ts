@@ -18,6 +18,28 @@ const make = (paid = false, t = Date.parse('2026-11-17T10:00:00Z')) => { let clo
 const png = (n = 100) => Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(n, 1)]);
 const mp4 = (n = 100) => Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypmp42'), Buffer.alloc(n, 3)]);
 
+test('public page renames keep earlier links pointed at the latest published address', async () => {
+  const { svc } = make();
+  const pageAt = (slug: string) => svc.publicBySlug(slug, { allowPreviousSlug: true });
+  const page = await svc.create('owner', { name: 'Aline Uwase', slug: 'aline-old', category: 'profile' });
+  await svc.update('owner', page.id, { tagline: 'IT student' });
+  await svc.setPublished('owner', page.id, true);
+  await assert.rejects(svc.update('owner', page.id, { slug: 'aline-invalid', appIconId: 'missing' }));
+  assert.equal(await pageAt('aline-invalid'), null);
+  assert.equal((await pageAt('aline-old'))?.slug, 'aline-old');
+  await svc.update('owner', page.id, { slug: 'aline-new' });
+  await svc.update('owner', page.id, { slug: 'aline-current' });
+  assert.equal((await pageAt('aline-old'))?.slug, 'aline-current');
+  assert.equal((await pageAt('aline-old'))?.category, 'profile');
+  assert.equal((await pageAt('aline-new'))?.slug, 'aline-current');
+  assert.equal(await svc.publicBySlug('aline-old'), null);
+  await assert.rejects(svc.create('someone-else', { name: 'Another Aline', slug: 'aline-old' }), /taken/);
+  await svc.setPublished('owner', page.id, false);
+  assert.equal(await pageAt('aline-old'), null);
+  await svc.remove('owner', page.id);
+  await svc.create('someone-else', { name: 'Another Aline', slug: 'aline-old' });
+});
+
 test('the studio kind: the server and the client agree for every category, and each kind has its own menu', () => {
   for (const c of CATEGORIES) assert.equal(clientKindOf(c), kindOf(c), c);
   assert.deepEqual(['shop', 'restaurant', 'farm', 'craft', 'other'].map(kindOf), ['sell', 'sell', 'sell', 'sell', 'sell']);

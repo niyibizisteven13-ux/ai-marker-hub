@@ -68,7 +68,7 @@ test('the whole story: create, fill, add a photo and a video, publish, visit, se
 test('the share preview carries the business’s own words, escaped, and its cover photo', () => {
   const b: any = { slug: 'mama-grace', name: 'Mama <Grace> & "Sons"', category: 'restaurant', tagline: 'Fresh </title><script>alert(1)</script>', about: '', theme: 'gold', contact: {}, hours: [], products: [], gallery: [], cover: { id: 'c1', kind: 'image' }, updatedAt: 'x' };
   const html = renderShell('<html><head><title>Bwenge</title><meta name="description" content="old" /></head><body></body></html>', b, 'https://www.bwenge.space/');
-  assert.match(html, /<title>Mama &lt;Grace&gt; &amp; &quot;Sons&quot; · Restaurant on Bwenge<\/title>/); assert.ok(!html.includes('<script>alert(1)'), 'no markup from a business gets through');
+  assert.match(html, /<title>Mama &lt;Grace&gt; &amp; &quot;Sons&quot; · Restaurant \| Bwenge4Biz<\/title>/); assert.ok(!html.includes('<script>alert(1)'), 'no markup from a business gets through');
   assert.ok(html.includes('property="og:image" content="https://www.bwenge.space/api/biz/public/mama-grace/media/c1"')); assert.ok(html.includes('rel="canonical" href="https://www.bwenge.space/b/mama-grace"')); assert.equal((html.match(/name="description"/g) ?? []).length, 1, 'the old description is replaced');
   void publicView;
 });

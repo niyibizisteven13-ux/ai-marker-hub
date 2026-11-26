@@ -1,7 +1,7 @@
 import { prisma } from '../../db.js';
 import { planFor } from '../billing/plans.js';
 import { diskMediaStore } from './media.js';
-import { createBizService, type BizService, type Kv } from './service.js';
+import { BizError, createBizService, type BizService, type Kv } from './service.js';
 
 /** The real storage: the AppSetting table (no migration) and the server's disk. */
 const db = prisma as any;
@@ -10,6 +10,28 @@ export const appSettingKv: Kv = {
   async put(key: string, value: unknown) {
     const at = new Date(); const ex = await db.appSetting.findUnique({ where: { key } }).catch(() => null);
     if (ex) await db.appSetting.update({ where: { key }, data: { value, updatedBy: 'biz', updatedAt: at } }); else await db.appSetting.create({ data: { key, value, updatedBy: 'biz', updatedAt: at } });
+  },
+  async renameBusiness(business, previousSlug) {
+    try {
+      await prisma.$transaction(async tx => {
+        const slugKey = `biz-slug:${business.slug}`;
+        const existing = await tx.appSetting.findUnique({ where: { key: slugKey } });
+        if (existing && (existing.value as { id?: string } | null)?.id !== business.id) {
+          throw new BizError('That page name is taken. Try another.', 409, 'SLUG_TAKEN');
+        }
+        if (!existing) await tx.appSetting.create({ data: { key: slugKey, value: { id: business.id }, updatedBy: 'biz' } });
+        const result = await tx.appSetting.updateMany({
+          where: { key: `biz:${business.id}`, value: { path: ['slug'], equals: previousSlug } },
+          data: { value: JSON.parse(JSON.stringify(business)), updatedBy: 'biz' },
+        });
+        if (!result.count) throw new BizError('The page address changed. Reload and try again.', 409);
+      });
+    } catch (error) {
+      if ((error as { code?: string })?.code === 'P2002') {
+        throw new BizError('That page name is taken. Try another.', 409, 'SLUG_TAKEN');
+      }
+      throw error;
+    }
   },
   async del(key: string) { await db.appSetting.delete({ where: { key } }).catch(() => undefined); },
 };
@@ -34,6 +56,7 @@ export const bizService = (): BizService => {
   if (svc) return svc;
   const store = diskMediaStore();
   const made = createBizService({
+    refreshPublicSitemap: async () => (await import('../searchDiscovery.js')).refreshPublicSitemap(),
     allowed: bizAllowed, kv: appSettingKv, notify: notifyOwner, syncAgenda, media: store,
     isVerified: async (userId) => (await import('../billing/badge.js')).hasBadge(userId),
     isPaid: async (userId) => { const p = await planFor(userId).catch(() => null); return !!p && p.id !== 'FREE'; },
