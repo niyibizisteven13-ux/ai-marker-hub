@@ -89,5 +89,12 @@ jobs:
       - name: Production build
         run: npm run build
 
+      - name: Keep backend bundles outside the public build
+        run: |
+          test -f dist/server.js
+          test -f dist/web/index.html
+          test -f dist/web/scanner.html
+          test -z "$(find dist/web -type f \( -name server.js -o -name server.js.map \) -print -quit)"
+
       - name: Cluster scripts parse
         run: for f in scripts/cluster/*.sh scripts/db-bootstrap-empty.sh; do bash -n "$f"; done

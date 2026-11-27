@@ -34,6 +34,11 @@ test('the whole story: create, fill, add a photo and a video, publish, visit, se
   const owner = await mkUser('biz-owner-1'), other = await mkUser('biz-owner-2');
   const created = await (await call('/', { token: owner, body: { name: 'Mama Grace Cafe', category: 'restaurant' } })).json(); const id = created.business.id, slug = created.business.slug; assert.equal(slug, 'mama-grace-cafe');
   assert.equal((await call(`/${id}`, { token: other })).status, 404, 'another owner cannot open it');
+  for (const route of ['/members', '/ledger', '/programs']) {
+    assert.equal((await call(`/${id}${route}`)).status, 401, route);
+    assert.equal((await call(`/${id}${route}`, { token: other })).status, 404, route);
+    assert.equal((await call(`/${id}${route}`, { token: owner })).status, 200, route);
+  }
   assert.equal((await call(`/${id}`, { method: 'PATCH', token: other, body: { name: 'x' } })).status, 404);
   await call(`/${id}`, { method: 'PATCH', token: owner, body: { tagline: 'Fresh every day', about: 'Rice, beans and juice.', whatsapp: '+250788123456', notes: 'PRIVATE-NOTE', momoCode: '123456', showPay: true } });
   await call(`/${id}/products`, { token: owner, body: { name: 'Rice and beans', price: 1500 } }); await call(`/${id}/products`, { token: owner, body: { name: 'Secret special', price: 1, hidden: true } });

@@ -42,3 +42,12 @@ test('generatePKCE produces valid verifier and challenge', () => {
   assert.ok(pkce.verifier.length > 30);
   assert.ok(pkce.challenge.length > 30);
 });
+
+
+test('Google OAuth routes skip the general limit without exempting other sign-in requests', async () => {
+  const { skipGeneralLimiter } = await import('../production/rateLimiter.js');
+  assert.equal(skipGeneralLimiter({ method: 'GET', originalUrl: '/api/auth/google/start' }), true);
+  assert.equal(skipGeneralLimiter({ method: 'GET', originalUrl: '/api/auth/google/callback?code=test' }), true);
+  assert.equal(skipGeneralLimiter({ method: 'POST', originalUrl: '/api/auth/email/start' }), false);
+  assert.equal(skipGeneralLimiter({ method: 'GET', originalUrl: '/api/auth/google/callback-other' }), false);
+});

@@ -10,6 +10,8 @@ import {defineConfig} from 'vite';
  * nothing about a test leaves our server). The WebAssembly files come from the pinned package at build time; the
  * small model file is committed under public/vendor/mediapipe.
  */
+const browserOutput = 'dist/web';
+
 function mediapipeWasm() {
   const dir = path.resolve(__dirname, 'node_modules/@mediapipe/tasks-vision/wasm');
   const files = ['vision_wasm_internal.js', 'vision_wasm_internal.wasm', 'vision_wasm_nosimd_internal.js', 'vision_wasm_nosimd_internal.wasm'];
@@ -24,7 +26,7 @@ function mediapipeWasm() {
       });
     },
     closeBundle() {
-      const out = path.resolve(__dirname, 'dist/vendor/mediapipe/wasm');
+      const out = path.resolve(__dirname, browserOutput, 'vendor/mediapipe/wasm');
       if (!fs.existsSync(dir)) return;
       fs.mkdirSync(out, { recursive: true });
       for (const f of files) fs.copyFileSync(path.join(dir, f), path.join(out, f));
@@ -43,6 +45,7 @@ export default defineConfig(() => {
       },
     },
     build: {
+      outDir: browserOutput,
       rollupOptions: {
         // scanner.html: the document scanner opened from the Telegram bot (Mini App).
         input: { main: path.resolve(__dirname, 'index.html'), scanner: path.resolve(__dirname, 'scanner.html') },

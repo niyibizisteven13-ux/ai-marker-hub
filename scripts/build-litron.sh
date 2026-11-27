@@ -21,5 +21,5 @@ printf '[]\n' > "$source_dir/public/server-config.json"
   npm run build -- --base=/litron-vpn/
 )
 
-mkdir -p "$app_root/dist/litron-vpn"
-cp -R "$source_dir/dist/." "$app_root/dist/litron-vpn/"
+mkdir -p "$app_root/dist/web/litron-vpn"
+cp -R "$source_dir/dist/." "$app_root/dist/web/litron-vpn/"

@@ -2940,7 +2940,11 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
+    const distPath = path.join(__dirname, 'web');
+    // Keep former backend artifact URLs out of the SPA fallback.
+    app.get(['/server.js', '/server.js.map'], (_req, res) => {
+      res.set('Cache-Control', 'no-store').status(404).end();
+    });
     app.use('/litron-vpn', express.static(path.join(distPath, 'litron-vpn'), { fallthrough: false }));
     // MySEB as its own app: /ms (and the root of a myseb.<domain> host) is the same site with MySEB's own name, icon, colour and manifest in the head.
     const mysebShell = async (_req: express.Request, res: express.Response) => {
