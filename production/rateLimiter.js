@@ -51,6 +51,14 @@ const QUIZ_RESULT_PATH = /^\/api\/forms\/[^/]+\/quiz-result\/?(?:\?|$)/;
 // A video player asks for its file in many pieces: a business page's photos and videos must not use up the allowance of everything else (see bizMediaLimiter).
 const BIZ_MEDIA_PATH = /^\/api\/biz\/public\/[^/]+\/media\//;
 
+const GOOGLE_SIGN_IN_PATH = /^\/api\/auth\/google\/(?:start|callback)\/?(?:\?|$)/i;
+
+export function skipGeneralLimiter(req) {
+  const url = req.originalUrl || '';
+  const googleSignIn = (req.method === 'GET' || req.method === 'HEAD') && GOOGLE_SIGN_IN_PATH.test(url);
+  return googleSignIn || url.startsWith('/api/auth/refresh') || LIVE_PATH.test(url) || QUIZ_RESULT_PATH.test(url) || BIZ_MEDIA_PATH.test(url);
+}
+
 export const generalLimiter = isDev
   ? (req, res, next) => next()
   : rateLimit({
@@ -60,7 +68,7 @@ export const generalLimiter = isDev
       limit: (req) => (userKey(req) ? 1500 : 600),
       keyGenerator: (req) => userKey(req) ?? ipKeyGenerator(req.ip ?? ''),
       // Staying signed in has its own limits (authLimiter) and must never be refused by this one. Live rooms have their own (below).
-      skip: (req) => (req.originalUrl || '').startsWith('/api/auth/refresh') || LIVE_PATH.test(req.originalUrl || '') || QUIZ_RESULT_PATH.test(req.originalUrl || '') || BIZ_MEDIA_PATH.test(req.originalUrl || ''),
+      skip: skipGeneralLimiter,
       standardHeaders: true,
       legacyHeaders: false,
     });
