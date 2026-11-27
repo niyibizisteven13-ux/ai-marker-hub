@@ -71,6 +71,7 @@ const FormStudioPage = lazyPage(() => import('./pages/FormStudioPage'));
 const ModelPage = lazyPage(() => import('./pages/ModelPage'));
 const LearnPage = lazyPage(() => import('./pages/LearnPage'));
 const TermsPage = lazyPage(() => import('./pages/TermsPage'));
+const FeatureBuilderPage = lazyPage(() => import('./pages/FeatureBuilderPage'));
 const ResearchPage = lazyPage(() => import('./pages/ResearchPage'));
 const OurStoryPage = lazyPage(() => import('./pages/OurStoryPage'));
 const AboutPage = lazyPage(() => import('./pages/AboutPage'));
@@ -1428,6 +1429,14 @@ export default function App() {
   // A student's private transcript: no account, the link is the key.
   const transcriptLink = /^\/t\/([\w-]{20,40})\/?$/.exec(window.location.pathname);
   if (transcriptLink) return <Suspense fallback={null}><TranscriptPage token={transcriptLink[1]} /></Suspense>;
+  if (/^\/builder\/?$/.test(window.location.pathname)) {
+    if (authStatus === 'loading') return null;
+    return <Suspense fallback={null}>
+      <FeatureBuilderPage key={authenticatedUser?.id ?? 'visitor'} signedIn={!!authenticatedUser} onLogin={() => setLoginModalOpen(true)} />
+      {loginModalOpen && <LoginModal isOpen={loginModalOpen} onClose={() => setLoginModalOpen(false)} defaultIsSignUp={false}
+        onLoginSuccess={(u) => { setAuthenticatedUser(u); setAuthStatus('authenticated'); setLoginModalOpen(false); }} />}
+    </Suspense>;
+  }
   if (/^\/research\/?$/.test(window.location.pathname) || (/^research\.bwenge\.space$/i.test(window.location.hostname) && window.location.pathname === '/')) {
     if (authStatus === 'loading') return <div className="min-h-[100dvh] bg-slate-50" />;
     return <Suspense fallback={null}><ResearchPage signedIn={!!authenticatedUser} onLogin={() => setLoginModalOpen(true)} onLogout={() => void handleLogout()} />

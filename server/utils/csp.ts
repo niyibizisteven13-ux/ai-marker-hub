@@ -44,6 +44,10 @@ const EXEMPT = new Set(['/scanner.html', '/scan.html']);
 
 export function contentSecurityPolicy(path: string, env: NodeJS.ProcessEnv = process.env): { header: string; value: string } | null {
   const mode = env.CSP_MODE ?? (env.NODE_ENV === 'production' ? 'enforce' : 'off');
+  if (path === '/builder-preview.html') return {
+    header: 'Content-Security-Policy',
+    value: "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'self'",
+  };
   if (mode === 'off' || EXEMPT.has(path) || path.startsWith('/api/')) return null;
   if (path === '/sandbox.html') return { header: 'Content-Security-Policy', value: SANDBOX };
   return { header: mode === 'report' ? 'Content-Security-Policy-Report-Only' : 'Content-Security-Policy', value: APP };

@@ -6,7 +6,10 @@ import { executeAgentTool } from '../services/executeAgentTool.js';
 import { initSandboxProject, killSandbox } from '../services/sandboxManager.js';
 import { writeAuditLog } from '../../production/auth.js';
 
+import featureBuilderRoutes from './featureBuilderRoutes.js';
+
 const router = Router();
+router.use('/builder', featureBuilderRoutes);
 const aiService = AiService.getInstance();
 function ownedProject(req: any, res: any, next: any) {
   const userId = req.user?.userId;
