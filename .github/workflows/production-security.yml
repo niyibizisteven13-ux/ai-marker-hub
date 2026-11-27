@@ -1,0 +1,29 @@
+name: Production security checks
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 */6 * * *'
+
+permissions: {}
+
+jobs:
+  public-surface:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check public headers and backend artifact isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          headers=$(mktemp)
+          trap 'rm -f -- "$headers"' EXIT
+          base=https://bwenge.space
+          curl --fail --silent --show-error --retry 2 --max-time 15 -D "$headers" -o /dev/null "$base/"
+          for name in strict-transport-security content-security-policy x-content-type-options; do
+            grep -qi "^$name:" "$headers" || { echo "::error::Missing header $name"; exit 1; }
+          done
+          for path in /server.js /server.js.map; do
+            status=$(curl --silent --show-error --retry 2 --max-time 15 -o /dev/null -w '%{http_code}' "$base$path")
+            [[ $status == 404 ]] || { echo "::error::$path returned $status, expected 404"; exit 1; }
+          done

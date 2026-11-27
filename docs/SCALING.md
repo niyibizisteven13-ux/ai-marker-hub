@@ -94,6 +94,15 @@ pg_restore --clean --if-exists --no-owner -d "$DATABASE_URL_WITHOUT_QUERY" /var/
 rsync -a /var/backups/bwenge/data/ /opt/nexus/data/
 systemctl start nexus
 ```
+
+To verify a trusted custom-format dump before an incident, run
+`sudo bash scripts/cluster/restore-drill.sh /var/backups/bwenge/db/<dump>.dump`.
+It restores to a disposable PostgreSQL instance with a private Unix socket and no
+TCP listener, checks that the two core application tables are readable, and
+deletes the instance. This drill covers the database. Restore the file mirror on
+an isolated host separately and verify that the app can read its uploads.
+A successful local drill does not verify independent off-site retention.
+
 For a brand-new empty database without a dump (a test environment), use `scripts/db-bootstrap-empty.sh`.
 
 ## Caddy
