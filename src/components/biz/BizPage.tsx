@@ -231,12 +231,14 @@ function BizPageInner({ business: b, base, lang, setLang, openNow, mediaSrc, pre
   const tabs: Array<[string, string, boolean]> = [['updates', b.category === 'creator' ? 'Videos and posts' : 'Updates', posts.length > 0], ['top', 'Overview', true], ['items', preset.itemsTitle, b.products.length > 0], ['gallery', 'Gallery', media.length > 0], ['about', 'About', true], ['contact', b.category === 'creator' ? 'Work with me' : 'Contact', true]];
   const tile = 'flex flex-col items-center justify-center gap-2 rounded-2xl border border-[#E7EAEE] bg-white px-2 py-4 text-center text-[13px] font-semibold text-[#0E1722] shadow-sm transition hover:-translate-y-0.5 hover:shadow-md';
   const iconWrap = 'flex h-11 w-11 items-center justify-center rounded-xl bg-[var(--acc)]/15 text-[#0E1722]';
-  const panel = 'rounded-3xl border border-[#E7EAEE] bg-white p-5 shadow-sm';
+  const compact = b.customerLayout === 'compact';
+  const editorial = b.customerLayout === 'editorial';
+  const panel = `border border-[#E7EAEE] bg-white shadow-sm ${compact ? 'rounded-2xl p-4' : 'rounded-3xl p-5'}`;
 
   return (
     <div style={{ '--acc': theme.accent, '--on': theme.on } as React.CSSProperties} className={`${preview ? '' : 'h-[100dvh] overflow-y-auto overscroll-contain'} bg-[#EEF1F6] font-sans text-[#0E1722] antialiased`}>
       {preview && <p className="relative z-40 bg-[#0E1722] px-4 py-2 text-center text-xs text-white">Preview: this is how visitors see your page. Nothing is sent from here.</p>}
-      <div className="mx-auto max-w-6xl sm:p-4 lg:p-6">
+      <div className={`mx-auto sm:p-4 lg:p-6 ${editorial ? 'max-w-4xl' : 'max-w-6xl'}`}>
         <div className="overflow-hidden bg-white shadow-[0_8px_40px_rgba(14,23,34,0.08)] sm:rounded-[28px]">
           {/* hero */}
           <header id="top">
@@ -245,7 +247,7 @@ function BizPageInner({ business: b, base, lang, setLang, openNow, mediaSrc, pre
               <div className="ml-auto inline-flex shrink-0 rounded-full bg-[#F0F2F5] p-0.5 text-xs font-semibold text-[#475467]" role="group" aria-label={tx("Language")}>{(['en', 'rw'] as const).map((l) => <button key={l} type="button" aria-pressed={lang === l} onClick={() => setLang(l)} className={`min-h-10 rounded-full px-3 ${lang === l ? 'bg-white text-[#0E1722] shadow-sm' : ''}`}>{l.toUpperCase()}</button>)}</div>
             </div>
             <div className="relative">
-            <div className="relative h-60 w-full overflow-hidden bg-[var(--acc)] sm:h-80">
+            <div className={`relative w-full overflow-hidden bg-[var(--acc)] ${compact ? 'h-40 sm:h-52' : 'h-60 sm:h-80'}`}>
               {b.cover ? <img src={mediaSrc(b.cover.id)} alt="" fetchPriority="high" decoding="async" className="h-full w-full object-cover" /> : <div className="flex h-full w-full items-center justify-center bg-[radial-gradient(circle_at_30%_20%,rgba(255,255,255,0.25),transparent_55%)] font-display text-8xl font-bold text-[var(--on)] opacity-30">{initials(b.name)}</div>}
               <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/75 via-black/25 to-black/10" />
             </div>
@@ -270,7 +272,7 @@ function BizPageInner({ business: b, base, lang, setLang, openNow, mediaSrc, pre
             {tabs.filter((t) => t[2]).map(([id, label], i) => <button key={id} type="button" onClick={() => go(id)} className={`shrink-0 rounded-xl px-4 py-2 text-sm font-semibold ${i === 0 ? 'bg-[var(--acc)] text-[var(--on)]' : 'text-[#475467] hover:bg-[#F0F2F5]'}`}>{tx(label)}</button>)}
           </nav>
 
-          <div className="grid gap-6 p-4 sm:p-6 lg:grid-cols-[1fr_340px]">
+          <div className={`grid ${compact ? 'gap-4 p-3 sm:p-5' : 'gap-6 p-4 sm:p-6'} ${editorial ? '' : 'lg:grid-cols-[1fr_340px]'}`}>
             <div className="min-w-0 space-y-6">
               {/* updates (the feed) */}
               {posts.length > 0 && <section id="updates" className="-mx-4 scroll-mt-20 sm:mx-0"><h2 className="mb-3 px-4 font-display text-2xl font-semibold tracking-tight sm:mb-4 sm:px-0">{tx("Updates")}</h2>

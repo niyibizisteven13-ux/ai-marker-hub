@@ -27,6 +27,8 @@ export type Category = (typeof CATEGORIES)[number];
 export type Kind = 'sell' | 'book' | 'learn' | 'creator' | 'profile';
 export const kindOf = (c: string): Kind => (c === 'profile' ? 'profile' : c === 'creator' ? 'creator' : c === 'school' ? 'learn' : c === 'salon' || c === 'health' || c === 'services' || c === 'transport' ? 'book' : 'sell');
 export const THEMES = ['gold', 'teal', 'green', 'blue', 'rose', 'violet', 'ink'] as const;
+export const CUSTOMER_LAYOUTS = ['classic', 'compact', 'editorial'] as const;
+export type CustomerLayout = (typeof CUSTOMER_LAYOUTS)[number];
 export type Theme = (typeof THEMES)[number];
 export const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
 export type Day = (typeof DAYS)[number];
@@ -67,6 +69,7 @@ export interface Business {
   previousSlugs?: string[];
   logoId?: string; coverId?: string;
   appName?: string; appIconId?: string;
+  customerLayout?: CustomerLayout;
   /** Where the business is on the map (public when set). */
   lat?: number; lng?: number;
   whatsapp?: string; phone?: string; email?: string; address?: string; mapUrl?: string; website?: string; instagram?: string; facebook?: string;
@@ -172,6 +175,7 @@ export function applyProfile(b: Business, patch: any): void {
   const set = <K extends keyof Business>(k: K, v: Business[K] | undefined) => { if (v === undefined || v === '') delete (b as any)[k]; else (b as any)[k] = v; };
   if (patch.name !== undefined) { const n = clean(patch.name, 60); if (n) b.name = n; }
   if (patch.category !== undefined) b.category = oneOf(CATEGORIES, patch.category, b.category);
+  if (patch.customerLayout !== undefined && b.category !== 'profile') b.customerLayout = oneOf(CUSTOMER_LAYOUTS, patch.customerLayout, b.customerLayout ?? 'classic');
   if (patch.theme !== undefined) b.theme = oneOf(THEMES, patch.theme, b.theme);
   if (patch.tagline !== undefined) b.tagline = clean(patch.tagline, 120);
   if (patch.about !== undefined) b.about = clean(patch.about, 1500);
@@ -245,6 +249,7 @@ export interface PublicBusiness {
   slug: string; name: string; category: Category; tagline: string; about: string; theme: Theme;
   logo?: PublicMedia; cover?: PublicMedia;
   appName?: string; appIcon?: PublicMedia;
+  customerLayout?: CustomerLayout;
   androidApkAvailable?: boolean;
   contact: { whatsapp?: string; phone?: string; email?: string; address?: string; mapUrl?: string; website?: string; instagram?: string; facebook?: string };
   hours: Hours[];
@@ -291,6 +296,7 @@ export function publicView(b: Business): PublicBusiness {
   if (typeof b.lat === 'number' && typeof b.lng === 'number') out.location = { lat: b.lat, lng: b.lng };
   const appIcon = pm(b.appIconId);
   if (appIcon) out.appIcon = appIcon;
+  if (b.customerLayout) out.customerLayout = b.customerLayout;
   if (b.appName) out.appName = b.appName;
   const logo = pm(b.logoId), cover = pm(b.coverId); if (logo) out.logo = logo; if (cover) out.cover = cover;
   if (b.showPay && b.momoCode) out.pay = { momoCode: b.momoCode, ...(b.momoName ? { momoName: b.momoName } : {}) };

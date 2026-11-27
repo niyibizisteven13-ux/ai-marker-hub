@@ -19,7 +19,7 @@ import {
  *   biz:<id> the business · biz-slug:<slug> -> id · biz-owner:<userId> -> ids · biz-enq:<id> messages · biz-stats:<id> counts
  *   biz-reports reports against pages · biz-index every id (for the administrator)
  */
-export interface Kv { get<T>(key: string): Promise<T | null>; put(key: string, value: unknown): Promise<void>; del(key: string): Promise<void>; renameBusiness?(business: Business, previousSlug: string): Promise<void> }
+export interface Kv { get<T>(key: string): Promise<T | null>; put(key: string, value: unknown): Promise<void>; del(key: string): Promise<void>; renameBusiness?(business: Business, previousSlug: string): Promise<void>; saveBusinessIfCurrent?(business: Business, version: string): Promise<boolean> }
 export class BizError extends Error { constructor(message: string, public status = 400, public code = 'BIZ') { super(message); } }
 export interface Deps { /** Who may use the owner side (the business dashboard is a paid feature). Absent: everyone. The public page never needs it. */ allowed?: (ownerId: string) => Promise<boolean>; kv: Kv; media: MediaStore; isPaid: (ownerId: string) => Promise<boolean>; /** Whether the owner bought the verified badge (a one-time payment). Absent: nobody is verified. */ isVerified?: (ownerId: string) => Promise<boolean>; /** Called after a video is stored, to make it play smoothly in the background (see videoPipeline.ts). Absent: videos are kept as uploaded. */ onVideo?: (job: { biz: string; id: string; ext: string }) => void; now?: () => number; secretKey?: Buffer; fetchImpl?: Fetch;
   /** Tells the owner something at once (Telegram, email or the chat outbox). `plan` becomes a Do it / Cancel plan the owner approves. */
@@ -188,8 +188,11 @@ export function createBizService(deps: Deps) {
       return b;
     },
 
-    async update(ownerId: string, id: string, patch: Record<string, unknown>): Promise<Business> {
+    async update(ownerId: string, id: string, patch: Record<string, unknown>, expectedUpdatedAt?: string): Promise<Business> {
       const b = await mine(ownerId, id);
+      if (expectedUpdatedAt !== undefined && b.updatedAt !== expectedUpdatedAt) {
+        throw new BizError('This business changed after the preview. Create a fresh design draft.', 409);
+      }
       const previousSlug = b.slug;
       if (patch.slug !== undefined && String(patch.slug).toLowerCase() !== b.slug) {
         const v = validSlug(patch.slug); if (v.ok === false) throw new BizError(v.error);
@@ -213,6 +216,12 @@ export function createBizService(deps: Deps) {
         else {
           await kv.put(`biz-slug:${b.slug}`, { id: b.id });
           await save(b);
+        }
+        mediaCache.clear();
+      } else if (expectedUpdatedAt !== undefined && kv.saveBusinessIfCurrent) {
+        b.updatedAt = new Date(Math.max(now(), Date.parse(expectedUpdatedAt) + 1)).toISOString();
+        if (!(await kv.saveBusinessIfCurrent(b, expectedUpdatedAt))) {
+          throw new BizError('This business changed after the preview. Create a fresh design draft.', 409);
         }
         mediaCache.clear();
       } else await save(b);

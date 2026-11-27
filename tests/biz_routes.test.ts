@@ -70,6 +70,29 @@ test('the whole story: create, fill, add a photo and a video, publish, visit, se
   assert.equal((await call(`/${id}`, { method: 'DELETE', token: owner })).status, 204); assert.equal((await call(`/public/${slug}`)).status, 404);
 });
 
+test('only the owner can apply an approved design and it updates the public page and app identity', async () => {
+  const owner = await mkUser('design-owner');
+  const other = await mkUser('design-other');
+  const { business: created } = await (await call('/', { token: owner, body: { name: 'Design Cafe', category: 'restaurant' } })).json();
+  const path = `/${created.id}/customer-design`;
+  await call(`/${created.id}`, { method: 'PATCH', token: owner, body: { tagline: 'Fresh lunch' } });
+  const { business } = await (await call(`/${created.id}/publish`, { token: owner, body: { on: true } })).json();
+  const draft = { version: business.updatedAt, design: { customerLayout: 'compact', theme: 'ink', appName: 'Design Cafe Meals' } };
+  assert.equal((await call(path, { token: other, body: { prompt: 'Change the layout' } })).status, 404);
+  assert.equal((await call(path, { method: 'PUT', body: draft })).status, 401);
+  assert.equal((await call(path, { method: 'PUT', token: other, body: draft })).status, 404);
+  assert.equal((await call(path, { method: 'PUT', token: owner, body: { ...draft, design: { ...draft.design, acceptPay: true } } })).status, 400);
+  assert.equal((await call(path, { method: 'PUT', token: owner, body: { ...draft, version: '2020-01-01T00:00:00.000Z' } })).status, 409);
+  assert.equal((await call(path, { method: 'PUT', token: owner, body: draft })).status, 200);
+  const pub = await (await call('/public/design-cafe')).json();
+  assert.equal(pub.business.customerLayout, 'compact');
+  assert.equal(pub.business.theme, 'ink');
+  assert.equal(pub.business.tagline, 'Fresh lunch');
+  const manifest = await (await call('/public/design-cafe/manifest.webmanifest')).json();
+  assert.equal(manifest.name, 'Design Cafe Meals');
+  assert.equal(manifest.start_url, '/b/design-cafe?source=app');
+});
+
 test('the share preview carries the business’s own words, escaped, and its cover photo', () => {
   const b: any = { slug: 'mama-grace', name: 'Mama <Grace> & "Sons"', category: 'restaurant', tagline: 'Fresh </title><script>alert(1)</script>', about: '', theme: 'gold', contact: {}, hours: [], products: [], gallery: [], cover: { id: 'c1', kind: 'image' }, updatedAt: 'x' };
   const html = renderShell('<html><head><title>Bwenge</title><meta name="description" content="old" /></head><body></body></html>', b, 'https://www.bwenge.space/');
