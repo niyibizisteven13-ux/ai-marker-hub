@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'">
+<title>App preview</title>
+</head>
+<body>
+<script>
+window.addEventListener('message', function receive(event) {
+  if (event.source !== window.parent || event.data?.type !== 'bwenge:builder-preview' || typeof event.data.html !== 'string') return;
+  window.removeEventListener('message', receive);
+  document.open();
+  document.write(event.data.html);
+  document.close();
+});
+</script>
+</body>
+</html>

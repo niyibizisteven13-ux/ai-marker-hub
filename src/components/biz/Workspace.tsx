@@ -387,6 +387,7 @@ export function AgentChatView({ b, onChange }: { b: Business; onChange: () => vo
   return (
     <div className="flex h-[calc(100dvh-9.5rem)] min-h-[420px] flex-col lg:h-[calc(100dvh-8rem)]">
       <div className="mb-3 flex items-center gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--brand)] text-[var(--brand-on)]"><Bot size={22} /></span><div className="min-w-0 flex-1"><h1 className="font-display text-xl font-semibold leading-tight">{tx("Business Agent")}</h1><p className="truncate text-xs text-[var(--app-muted)]">Runs {b.name} with you · records sales, watches stock, sends payment requests · private</p></div>
+        <a href="/builder?workspace=business" className={`${btnGhost} !min-h-9 !px-3 text-xs`}>App Builder</a>
         {msgs.length > 0 && <button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={() => { setMsgs([]); try { sessionStorage.removeItem(key); } catch { /* ignore */ } }}>{tx("New chat")}</button>}</div>
       {b.category !== 'profile' && <button type="button" className={`${btnGhost} mb-2 self-start !min-h-9 !px-3 text-xs`} onClick={() => setDesignOpen(true)}>Design app</button>}
       <div className={`${card} flex min-h-0 flex-1 flex-col !p-0`}>
