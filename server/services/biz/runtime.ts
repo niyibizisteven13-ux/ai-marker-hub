@@ -11,6 +11,13 @@ export const appSettingKv: Kv = {
     const at = new Date(); const ex = await db.appSetting.findUnique({ where: { key } }).catch(() => null);
     if (ex) await db.appSetting.update({ where: { key }, data: { value, updatedBy: 'biz', updatedAt: at } }); else await db.appSetting.create({ data: { key, value, updatedBy: 'biz', updatedAt: at } });
   },
+  async saveBusinessIfCurrent(business, version) {
+    const result = await prisma.appSetting.updateMany({
+      where: { key: `biz:${business.id}`, value: { path: ['updatedAt'], equals: version } },
+      data: { value: JSON.parse(JSON.stringify(business)), updatedBy: 'biz' },
+    });
+    return result.count === 1;
+  },
   async renameBusiness(business, previousSlug) {
     try {
       await prisma.$transaction(async tx => {

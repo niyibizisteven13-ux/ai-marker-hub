@@ -7,6 +7,7 @@ import type { Mine } from '../../biz/api';
 import { pageUrl, rwf, type TrackerInfo, type TrackerRecordInfo, type SectionInfo, type Costs, type AgentSettings, type Business, type Dashboard, type LedgerEntry, type SecretsStatus } from '../../biz/types';
 import { btn, btnGhost, btnPrimary, card, input, msg, PaidNote, rwfShort, Tag, Title } from './ui';
 import PostComposer from './PostComposer';
+import CustomerDesign from './CustomerDesign';
 
 type Go = (view: string) => void;
 const money = (n: number) => `RWF ${n.toLocaleString('en-US')}`;
@@ -380,11 +381,14 @@ export function AgentChatView({ b, onChange }: { b: Business; onChange: () => vo
     catch (e) { setErr(msg(e)); } finally { setBusy(false); }
   };
   useEffect(() => { try { const k = `bz-seed-${b.id}`; const v = sessionStorage.getItem(k); if (v) { sessionStorage.removeItem(k); void send(v); } } catch { /* optional */ } }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+  const [designOpen, setDesignOpen] = useState(false);
+  if (designOpen) return <CustomerDesign key={b.id} business={b} onChange={onChange} onClose={() => setDesignOpen(false)} />;
   const chips = ['How is my business today?', 'Today I sold 5 loaves for 4,000', 'What is running out?', 'How was my week?', 'Show my pending orders'];
   return (
     <div className="flex h-[calc(100dvh-9.5rem)] min-h-[420px] flex-col lg:h-[calc(100dvh-8rem)]">
       <div className="mb-3 flex items-center gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--brand)] text-[var(--brand-on)]"><Bot size={22} /></span><div className="min-w-0 flex-1"><h1 className="font-display text-xl font-semibold leading-tight">{tx("Business Agent")}</h1><p className="truncate text-xs text-[var(--app-muted)]">Runs {b.name} with you · records sales, watches stock, sends payment requests · private</p></div>
         {msgs.length > 0 && <button type="button" className={`${btnGhost} !min-h-9 !px-3 text-xs`} onClick={() => { setMsgs([]); try { sessionStorage.removeItem(key); } catch { /* ignore */ } }}>{tx("New chat")}</button>}</div>
+      {b.category !== 'profile' && <button type="button" className={`${btnGhost} mb-2 self-start !min-h-9 !px-3 text-xs`} onClick={() => setDesignOpen(true)}>Design app</button>}
       <div className={`${card} flex min-h-0 flex-1 flex-col !p-0`}>
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4" aria-live="polite">
           {!msgs.length && <div className="py-6 text-center"><p className="font-display text-lg font-semibold">{tx("What shall we do today?")}</p><p className="mx-auto mt-1 max-w-sm text-sm text-[var(--app-muted)]">Tell me what you sold or spent, send a photo of your sales book, or ask how the business is doing.</p>

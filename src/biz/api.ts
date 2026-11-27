@@ -43,7 +43,16 @@ export interface Mine { prefs?: { studioLang?: 'en' | 'rw' }; locked?: boolean; 
 export const stampImageUrl = (businessId: string, image: string) =>
   getApiUrl(`/api/biz/stamp-images/${encodeURIComponent(businessId)}/${encodeURIComponent(image)}`);
 
+export type CustomerDesign = import('../../server/services/biz/customerDesign').CustomerDesign;
+export type CustomerDesignDraft = { design: CustomerDesign; version: string; business: PublicBusiness; openNow: boolean | null };
+
 export const ownerApi = {
+  draftCustomerDesign: async (id: string, prompt: string) => read<CustomerDesignDraft>(await authFetch(
+    `/api/biz/${encodeURIComponent(id)}/customer-design`, json('POST', { prompt }),
+  )),
+  applyCustomerDesign: async (id: string, draft: CustomerDesignDraft) => read<{ business: Business; androidBuild?: 'requested' | 'unconfigured' | 'failed' }>(await authFetch(
+    `/api/biz/${encodeURIComponent(id)}/customer-design`, json('PUT', { design: draft.design, version: draft.version }),
+  )),
   androidBuildStatus: async (id: string, signal?: AbortSignal) => read<{ enabled: boolean }>(await authFetch(`/api/biz/${encodeURIComponent(id)}/customer-app/android-build`, { signal })),
   buildAndroidApp: async (id: string) => read<{ queued: true }>(await authFetch(`/api/biz/${encodeURIComponent(id)}/customer-app/android-build`, json('POST', {}))),
   uploadStamp: async (businessId: string, file: File) => read<{ id: string }>(await authFetch(
