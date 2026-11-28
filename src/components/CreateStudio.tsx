@@ -470,6 +470,10 @@ export default function CreateStudio({
 
             {menuOpen && typeof document !== 'undefined' && createPortal(
               <div ref={menuRef} role="dialog" aria-label="Conversation options" className="bwenge-menu-scroll bwenge-menu-enter fixed z-[9999] flex max-h-[min(72dvh,36rem)] w-[min(20rem,calc(100vw-1.5rem))] flex-col overflow-y-auto overscroll-contain rounded-2xl border border-white/10 bg-[var(--app-panel-2)] p-2 text-sm text-[var(--app-text)] shadow-[0_24px_80px_rgba(0,0,0,.65)] ring-1 ring-black/30 backdrop-blur-2xl" style={{ top: menuPosition.top, right: menuPosition.right }}>
+                <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-xl px-3 hover:bg-white/10">
+                  <input type="checkbox" className="h-3.5 w-3.5 accent-[var(--brand)]" checked={suggestOn} onChange={(e) => { setSuggestOn(e.target.checked); setNextPromptEnabled(e.target.checked); }} />
+                  <span>Suggest my next message</span>
+                </label>
                 {/* This Chat Section */}
                 <div className="px-3 pb-1.5 pt-2 font-bold text-[10px] tracking-[.14em] uppercase text-neutral-400">Conversation</div>
                 <button
@@ -647,6 +651,8 @@ export default function CreateStudio({
 
               {user && (
                 <StarterCards
+                  key={user.id}
+                  userId={user.id}
                   onOpenPublicLibrary={onOpenPublicLibrary}
                   onOpenBiz={onOpenBiz}
                   onOpenForms={onOpenFormsLibrary}
@@ -900,16 +906,13 @@ export default function CreateStudio({
               </div>
             </div>
 
-            {/* Under the box (only while you are writing): the learning mode and the next-message suggestion switch */}
+            {/* Under the box (only while you are writing): the learning mode picker */}
             {!compact && (
               <div className="mt-2.5 pt-2 border-t border-white/5 flex items-center justify-between text-[11px] text-neutral-400">
                 <div className="flex items-center gap-3">
                   <LearningModePicker value={learning} onChange={setLearning} />
                 </div>
-                <label className="flex cursor-pointer items-center gap-1.5">
-                  <input type="checkbox" className="h-3.5 w-3.5 accent-[var(--brand)]" checked={suggestOn} onChange={(e) => { setSuggestOn(e.target.checked); setNextPromptEnabled(e.target.checked); }} />
-                  <span>Suggest my next message</span>
-                </label>
+
               </div>
             )}
           </div>

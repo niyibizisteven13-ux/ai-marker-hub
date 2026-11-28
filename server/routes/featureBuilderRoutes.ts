@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { isChatAppProject } from '../../shared/chatAppBuilder.js';
+import { chatAppLink, isChatAppProject } from '../../shared/chatAppBuilder.js';
 import { prisma } from '../db.js';
 import { AgentRuntime } from '../services/ai/AgentRuntime.js';
 import { bwengeAgent, fileStore, userAgentTarget } from '../services/AiService.js';
@@ -27,6 +27,32 @@ function projectKey(userId: string, kind: string, project: unknown) {
 }
 
 router.use((_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
+
+// Only completed edits create a project row. Opening an empty starter leaves recency alone.
+router.get('/recent', async (req, res, next) => {
+  const userId = (req as any).user?.userId;
+  if (!userId) return res.sendStatus(401);
+  const prefix = `feature-builder:${userId}:`;
+  try {
+    const row = await prisma.appSetting.findFirst({
+      where: { updatedBy: userId, key: { startsWith: prefix } },
+      orderBy: [{ updatedAt: 'desc' }, { key: 'asc' }],
+      select: { key: true, value: true },
+    });
+    if (!row) return res.json(null);
+    const suffix = row.key.slice(prefix.length);
+    const projectId = suffix.startsWith('chat:') ? suffix.slice(5) : null;
+    const kind = kindSchema.safeParse(projectId ? 'custom' : suffix);
+    const project = storedSchema.safeParse(row.value);
+    if (!kind.success || !project.success || (projectId && !isChatAppProject(projectId))) return res.json(null);
+    const fallback = { business: 'Business app', profile: 'Portfolio', research: 'Research app', custom: 'Custom app' };
+    const heading = project.data.files['App.jsx'].match(/<h1\b[^>]*>\s*([^<>{}]+?)\s*<\/h1>/i)?.[1];
+    return res.json({
+      title: heading?.trim().slice(0, 100) || fallback[kind.data],
+      href: projectId ? chatAppLink(projectId) : `/builder?workspace=${kind.data}`,
+    });
+  } catch (error) { next(error); }
+});
 
 router.get('/:kind', async (req, res, next) => {
   const kind = kindSchema.safeParse(req.params.kind);
