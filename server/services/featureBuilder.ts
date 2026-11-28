@@ -1,5 +1,6 @@
 import { createRequire } from 'node:module';
-import { build } from 'esbuild';
+import { build, transform } from 'esbuild';
+import { checkFeatureBrowser, renderFeatureScreenshot, screenshotsConfigured, screenshotSizes } from './featureScreenshot.js';
 import { ToolRegistry } from './ai/tools/registry.js';
 
 export const starterNames = ['business', 'profile', 'research', 'custom'] as const;
@@ -21,7 +22,8 @@ export function starterFiles(kind: Starter): ProjectFiles {
 
 export function featureBuilderTools(files: ProjectFiles) {
   const path = { type: 'string', enum: ['App.jsx', 'styles.css'] };
-  return new ToolRegistry([
+  let browserRuns = 0;
+  const tools = new ToolRegistry([
     {
       definition: { name: 'read_project_file', description: 'Read App.jsx or styles.css from this project.',
         parameters: { type: 'object', properties: { path }, required: ['path'], additionalProperties: false } },
@@ -45,6 +47,29 @@ export function featureBuilderTools(files: ProjectFiles) {
       },
     },
   ]);
+  if (screenshotsConfigured()) {
+    const parameters = {
+      type: 'object', properties: { viewport: { type: 'string', enum: Object.keys(screenshotSizes) } },
+      required: ['viewport'], additionalProperties: false,
+    };
+    tools.add({
+      definition: { name: 'check_project_browser', description: 'Run a browser smoke check for rendering, layout overflow and visibly unnamed controls.', parameters },
+      execute: async ({ viewport }: { viewport: keyof typeof screenshotSizes }) => {
+        if (++browserRuns > 2) return { text: 'Browser run limit reached for this task.', isError: true };
+        const checks = await checkFeatureBrowser(await compileFeaturePreview(files), viewport);
+        return { text: JSON.stringify(checks), isError: !checks.rendered || checks.runtimeErrors > 0 };
+      },
+    });
+    tools.add({
+      definition: { name: 'inspect_project_screenshot', description: 'Capture and inspect the current draft in Chromium when visual verification is requested.', parameters },
+      execute: async ({ viewport }: { viewport: keyof typeof screenshotSizes }) => {
+        if (++browserRuns > 2) return { text: 'Browser run limit reached for this task.', isError: true };
+        const png = await renderFeatureScreenshot(await compileFeaturePreview(files), viewport);
+        return { text: `Captured ${viewport} preview.`, images: [{ mime: 'image/png', base64: png.toString('base64') }] };
+      },
+    });
+  }
+  return tools;
 }
 
 const requireReactPath = createRequire(import.meta.url).resolve;
@@ -52,6 +77,8 @@ const requireReactPath = createRequire(import.meta.url).resolve;
 const escapeClosingTag = (code: string, tag: string) => code.replace(new RegExp(`</${tag}`, 'gi'), match => '<\\/' + match.slice(2));
 
 export async function compileFeaturePreview(files: ProjectFiles): Promise<string> {
+  const cssResult = await transform(files['styles.css'], { loader: 'css', logLevel: 'silent' });
+  if (cssResult.warnings.length) throw new Error(cssResult.warnings[0].text);
   const result = await build({
     stdin: {
       contents: "import { createRoot } from 'react-dom/client'; import App from 'builder-app'; createRoot(document.getElementById('root')).render(<App />);",
@@ -80,7 +107,7 @@ export async function compileFeaturePreview(files: ProjectFiles): Promise<string
     }],
   });
   const js = escapeClosingTag(result.outputFiles[0].text, 'script');
-  const css = escapeClosingTag(files['styles.css'], 'style');
+  const css = escapeClosingTag(cssResult.code, 'style');
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; base-uri 'none'; form-action 'none'"><style>${css}</style></head><body><div id="root"></div><script>${js}</script></body></html>`;
 }
 

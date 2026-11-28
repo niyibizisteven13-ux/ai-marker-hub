@@ -10,23 +10,56 @@ import { bwengeAgent, fileStore, userAgentTarget } from '../services/AiService.j
 import { checkUsage, recordUsage } from '../services/billing/usage.js';
 import { compileFeaturePreview, featureBuilderTools, starterFiles, starterNames } from '../services/featureBuilder.js';
 
+import { nextRevision, projectFilesSchema, revisionMetadata, revisionStateSchema, snapshot, type RevisionState } from '../services/featureRevisions.js';
+import type { Starter } from '../services/featureBuilder.js';
+import type { Prisma } from '@prisma/client';
+
 const router = Router();
 const kindSchema = z.enum(starterNames);
 const requestSchema = z.object({
   prompt: z.string().trim().min(1).max(4_000),
   revision: z.number().int().nonnegative().optional(),
+  mode: z.enum(['quick', 'standard']).optional(),
 }).strict();
-const storedSchema = z.object({
-  revision: z.number().int().positive(),
-  files: z.object({ 'App.jsx': z.string().max(24_000), 'styles.css': z.string().max(24_000) }),
-  summary: z.string().max(4_000),
-});
 const active = new Set<string>();
+const toolLabels: Record<string, string> = {
+  read_project_file: 'Reading source',
+  write_project_file: 'Writing source',
+  check_project_build: 'Checking build',
+  check_project_browser: 'Running browser checks',
+  inspect_project_screenshot: 'Capturing draft screenshot',
+};
 
 function projectKey(userId: string, kind: string, project: unknown) {
   if (project === undefined) return `feature-builder:${userId}:${kind}`;
   if (kind === 'custom' && isChatAppProject(project)) return `feature-builder:${userId}:chat:${project}`;
   return null;
+}
+
+function loadState(value: unknown, kind: Starter): RevisionState {
+  if (value !== undefined) return revisionStateSchema.parse(value);
+  return { revision: 0, files: starterFiles(kind), summary: '', history: [], notes: '' };
+}
+
+async function saveState(key: string, userId: string, previous: Prisma.JsonValue | undefined, value: RevisionState) {
+  if (previous !== undefined) {
+    const written = await prisma.appSetting.updateMany({
+      where: { key, value: { equals: previous as Prisma.InputJsonValue } },
+      data: { value, updatedBy: userId },
+    });
+    return written.count === 1;
+  }
+  try {
+    await prisma.appSetting.create({ data: { key, value, updatedBy: userId } });
+    return true;
+  } catch (error) {
+    if ((error as { code?: string })?.code === 'P2002') return false;
+    throw error;
+  }
+}
+
+async function projectResponse(state: RevisionState) {
+  return { ...snapshot(state), ...revisionMetadata(state), preview: await compileFeaturePreview(state.files) };
 }
 
 router.use((_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
@@ -40,8 +73,8 @@ router.get('/:kind', async (req, res, next) => {
   if (!key) return res.status(400).json({ error: 'Invalid app project.' });
   try {
     const row = await prisma.appSetting.findUnique({ where: { key } });
-    const state = row ? storedSchema.parse(row.value) : { revision: 0, files: starterFiles(kind.data), summary: '' };
-    res.json({ ...state, preview: await compileFeaturePreview(state.files) });
+    const state = loadState(row?.value, kind.data);
+    res.json(await projectResponse(state));
   } catch (error) { next(error); }
 });
 
@@ -62,11 +95,88 @@ router.post('/:kind/screenshot', screenshotLimit, async (req, res) => {
   if (!screenshotsConfigured()) return res.status(503).json({ error: 'The screenshot environment is not configured.' });
   try {
     const row = await prisma.appSetting.findUnique({ where: { key } });
-    const state = row ? storedSchema.parse(row.value) : { revision: 0, files: starterFiles(kind.data) };
-    if (state.revision !== input.data.revision) return res.status(409).json({ error: 'Reload the project before capturing the new revision.' });
-    const png = await renderFeatureScreenshot(await compileFeaturePreview(state.files), input.data.viewport);
+    const state = loadState(row?.value, kind.data);
+    const selected = [state, ...state.history, state.published].find(item => item?.revision === input.data.revision);
+    if (!selected) return res.status(404).json({ error: 'This revision is no longer available.' });
+    const png = await renderFeatureScreenshot(await compileFeaturePreview(selected.files), input.data.viewport);
     res.type('png').send(png);
   } catch { res.status(502).json({ error: 'The preview could not be captured.' }); }
+});
+
+const revisionNumber = z.number().int().nonnegative();
+const actionSchema = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('edit'), revision: revisionNumber, files: projectFilesSchema }).strict(),
+  z.object({ action: z.literal('restore'), revision: revisionNumber, target: revisionNumber }).strict(),
+  z.object({ action: z.literal('release'), revision: revisionNumber, target: revisionNumber.optional() }).strict(),
+  z.object({ action: z.literal('notes'), revision: revisionNumber, notes: z.string().trim().max(2_000) }).strict(),
+]);
+
+router.get('/:kind/revision/:revision', async (req, res, next) => {
+  const kind = kindSchema.safeParse(req.params.kind);
+  const userId = (req as any).user?.userId;
+  if (!userId) return res.sendStatus(401);
+  if (!kind.success) return res.sendStatus(404);
+  const key = projectKey(userId, kind.data, req.query.project);
+  if (!key) return res.sendStatus(400);
+  try {
+    const row = await prisma.appSetting.findUnique({ where: { key } });
+    const state = loadState(row?.value, kind.data);
+    const selected = req.params.revision === 'release'
+      ? state.published
+      : [state, ...state.history].find(item => String(item.revision) === req.params.revision);
+    if (!selected) return res.sendStatus(404);
+    res.json({ revision: selected.revision, preview: await compileFeaturePreview(selected.files) });
+  } catch (error) { next(error); }
+});
+
+router.post('/:kind/revisions', async (req, res, next) => {
+  const kind = kindSchema.safeParse(req.params.kind);
+  const input = actionSchema.safeParse(req.body);
+  const userId = (req as any).user?.userId;
+  if (!userId) return res.sendStatus(401);
+  if (!kind.success || !input.success) return res.status(400).json({ error: 'Invalid revision action.' });
+  const key = projectKey(userId, kind.data, req.query.project);
+  if (!key) return res.sendStatus(400);
+  if (active.has(userId)) return res.status(409).json({ error: 'Your build is still running.' });
+  const action = input.data;
+  const conflict = () => res.status(409).json({ error: 'The project changed. Reload it and try again.' });
+  try {
+    const row = await prisma.appSetting.findUnique({ where: { key } });
+    const state = loadState(row?.value, kind.data);
+    if (state.revision !== action.revision) return conflict();
+    let value = state;
+    switch (action.action) {
+      case 'edit':
+        value = nextRevision(state, action.files, 'Edited source in the workspace.');
+        break;
+      case 'restore': {
+        const target = state.history.find(item => item.revision === action.target) ??
+          (state.published?.revision === action.target ? state.published : undefined);
+        if (!target) return res.status(404).json({ error: 'This revision is no longer available.' });
+        value = nextRevision(state, target.files, `Restored revision ${target.revision}.`);
+        break;
+      }
+      case 'release': {
+        const target = action.target === undefined ? state : state.history.find(item => item.revision === action.target);
+        if (!target) return res.status(404).json({ error: 'This revision is no longer available.' });
+        value = { ...state, published: snapshot(target) };
+        break;
+      }
+      case 'notes':
+        value = { ...state, notes: action.notes };
+        break;
+    }
+    let result;
+    try {
+      result = await projectResponse(value);
+      if (action.action === 'release' && value.published?.revision !== value.revision) {
+        await compileFeaturePreview(value.published!.files);
+      }
+    }
+    catch { return res.status(422).json({ error: 'Compilation failed. Check your React and CSS source.' }); }
+    if (!await saveState(key, userId, row?.value, value)) return conflict();
+    res.json(result);
+  } catch (error) { next(error); }
 });
 
 router.post('/:kind', async (req, res, next) => {
@@ -101,7 +211,7 @@ router.post('/:kind', async (req, res, next) => {
   };
   try {
     const row = await prisma.appSetting.findUnique({ where: { key } });
-    const state = row ? storedSchema.parse(row.value) : { revision: 0, files: starterFiles(kind.data) };
+    const state = loadState(row?.value, kind.data);
     const conflict = () => failure(409, 'This project changed in another tab. Reload it and try again.');
     if (!fromChat && state.revision !== input.data.revision) return conflict();
     const gate = await checkUsage(userId, { kind: 'chat', chars: input.data.prompt.length });
@@ -119,20 +229,24 @@ router.post('/:kind', async (req, res, next) => {
     const result = await runtime.run({
       model: target.model,
       fallbackModel: target.fallbackModel,
-      maxTurns: 8,
-      maxTokens: target.maxOutputTokens,
-      system: `Build functioning React features for this ${kind.data} prototype. Read the existing files before changing them. Edit App.jsx and styles.css with the tools. Export an App component by default. Import only React. Use responsive CSS, accessible controls, and sample data for workflows that need a backend. Use the build check and fix errors before summarizing the work. This project has no live platform or customer data. Make real code changes when requested.`,
-      messages: [{ role: 'user', content: input.data.prompt }],
+      maxTurns: input.data.mode === 'quick' ? 4 : 8,
+      maxTokens: input.data.mode === 'quick' ? Math.min(2_400, target.maxOutputTokens ?? 2_400) : target.maxOutputTokens,
+      system: `Build functioning React features for this ${kind.data} prototype. Read the existing files before changing them. Edit App.jsx and styles.css with the tools. Export an App component by default. Import only React. Use responsive CSS, accessible controls, and sample data for workflows that need a backend. Use the build check and fix errors before summarizing the work. When browser tools are available, check visible changes in the browser and inspect a screenshot if requested. This project has no live platform or customer data. Make real code changes when requested.`,
+      messages: [{ role: 'user', content: state.notes
+        ? `Saved project preferences:\n${state.notes}\n\nCurrent task:\n${input.data.prompt}`
+        : input.data.prompt }],
       ctx: { userId, files: fileStore, services: bwengeAgent.services, signal: abort.signal },
       onEvent: event => {
         if (event.type === 'tool_call') {
-          const label = { read_project_file: 'Reading source', write_project_file: 'Writing source', check_project_build: 'Checking build' }[event.data.name as 'read_project_file' | 'write_project_file' | 'check_project_build'] || 'Working on project';
+          const label = toolLabels[event.data.name] || 'Working on project';
           const input = event.data.input as { path?: unknown } | undefined;
           const detail = typeof input?.path === 'string' ? input.path.slice(0, 80) : undefined;
           emit({ type: 'progress', id: event.data.id, label, state: 'running', detail });
         } else if (event.type === 'tool_result') {
-          const label = { read_project_file: 'Reading source', write_project_file: 'Writing source', check_project_build: 'Checking build' }[event.data.name as 'read_project_file' | 'write_project_file' | 'check_project_build'] || 'Working on project';
-          emit({ type: 'progress', id: event.data.id, label, state: event.data.isError ? 'error' : 'done' });
+          const label = toolLabels[event.data.name] || 'Working on project';
+          const showResult = ['check_project_build', 'check_project_browser'].includes(event.data.name);
+          emit({ type: 'progress', id: event.data.id, label, state: event.data.isError ? 'error' : 'done',
+            detail: showResult ? event.data.output.slice(0, 220) : undefined });
         }
       },
     });
@@ -147,20 +261,11 @@ router.post('/:kind', async (req, res, next) => {
     catch { return failure(422, 'The generated code did not compile. Your last working version is still available.'); }
     progress('compile', 'Compiling preview', 'done');
     progress('save', 'Saving working revision', 'running');
-    const revision = state.revision + Number(changed.length > 0);
-    if (changed.length) {
-      const value = { revision, files, summary };
-      if (row) {
-        const updated = await prisma.appSetting.updateMany({
-          where: { key, value: { path: ['revision'], equals: state.revision } }, data: { value, updatedBy: userId },
-        });
-        if (updated.count !== 1) return conflict();
-      } else {
-        try { await prisma.appSetting.create({ data: { key, value, updatedBy: userId } }); }
-        catch (error) { if ((error as { code?: string })?.code === 'P2002') return conflict(); throw error; }
-      }
-    }
-    const data = fromChat ? { revision, summary, changed } : { revision, files, preview, summary, changed };
+    const value = changed.length ? nextRevision(state, files, summary) : state;
+    if (changed.length && !await saveState(key, userId, row?.value, value)) return conflict();
+    const usage = { inputTokens: result.usage.input_tokens, outputTokens: result.usage.output_tokens };
+    const details = { revision: value.revision, summary, changed, usage };
+    const data = fromChat ? details : { ...revisionMetadata(value), ...details, files, preview };
     if (!streaming) return res.json(data);
     progress('save', 'Saving working revision', 'done');
     emit({ type: 'result', data });
