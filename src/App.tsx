@@ -1,3 +1,4 @@
+import { requestBuilderRun } from './utils/builderStream';
 import { chatAppLink, chatAppRequest, featureBuilderEndpoint, isChatAppProject } from '../shared/chatAppBuilder';
 import React, { useState, useEffect } from 'react';
 import { PreviewDialog, attachmentSource, type PreviewSource } from './components/FilePreview';
@@ -1126,13 +1127,17 @@ export default function App() {
       let assistantText = '';
       if (buildInChat) {
         if (temporaryChatMode) throw new Error('Switch off temporary chat to save an app project.');
-        const response = await authFetch(featureBuilderEndpoint('custom', currentSessionId), {
-          method: 'POST',
-          body: JSON.stringify({ prompt: text.trim().replace(/^\/app\s+/i, '') }),
-          signal: controller.signal,
-        });
-        const result = await response.json().catch(() => null);
-        if (!response.ok || !result) throw new Error(result?.error || 'The app build could not finish.');
+        const result = await requestBuilderRun<{ revision: number; summary: string; changed: string[] }>(
+          featureBuilderEndpoint('custom', currentSessionId),
+          { prompt: text.trim().replace(/^\/app\s+/i, '') },
+          progress => {
+            toolSteps = applyStatusEvent(toolSteps, progress);
+            firstTokenReceived = true;
+            resetIdleTimeout();
+            updateAssistant('', true);
+          },
+          controller.signal,
+        );
         const summary = typeof result.summary === 'string' ? result.summary : '';
         assistantText = result.revision > 0
           ? `${result.changed?.length ? `Saved app revision ${result.revision}.` : 'Your last working revision is available.'}\n\n[Open app](${appLink})${summary ? `\n\n${summary}` : ''}`

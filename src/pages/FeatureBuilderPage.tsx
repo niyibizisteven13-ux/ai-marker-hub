@@ -1,7 +1,8 @@
 import { featureBuilderEndpoint, isChatAppProject } from '../../shared/chatAppBuilder';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { ArrowLeft, Code2, Download, Monitor, Smartphone } from 'lucide-react';
+import { ArrowLeft, Camera, Code2, Download, Monitor, Smartphone } from 'lucide-react';
 import { authFetch } from '../utils/authFetch';
+import { requestBuilderRun, type BuilderProgress } from '../utils/builderStream';
 
 const workspaces = {
   business: { label: 'Bwenge4Biz', example: 'Build a restaurant menu with lunch and dinner filters.' },
@@ -42,6 +43,9 @@ export default function FeatureBuilderPage({ signedIn, onLogin }: { signedIn: bo
   const [prompt, setPrompt] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<BuilderProgress[]>([]);
+  const [capturing, setCapturing] = useState(false);
+  const [screenshot, setScreenshot] = useState<{ url: string; viewport: 'desktop' | 'phone'; revision: number }>();
   const [reload, setReload] = useState(0);
   const [view, setView] = useState<'desktop' | 'phone' | 'code'>('desktop');
   const [file, setFile] = useState<keyof Project['files']>('App.jsx');
@@ -53,6 +57,8 @@ export default function FeatureBuilderPage({ signedIn, onLogin }: { signedIn: bo
     if (!signedIn) return;
     const controller = new AbortController();
     setProject(null);
+    setScreenshot(undefined);
+    setProgress([]);
     setError('');
     void (async () => {
       try {
@@ -67,15 +73,41 @@ export default function FeatureBuilderPage({ signedIn, onLogin }: { signedIn: bo
     return () => controller.abort();
   }, [endpoint, reload, signedIn]);
 
-  async function requestBuild(event: FormEvent) {
-    event.preventDefault();
-    if (!project || !prompt.trim() || busy) return;
-    setBusy(true);
+  useEffect(() => () => { if (screenshot) URL.revokeObjectURL(screenshot.url); }, [screenshot]);
+
+  async function capture() {
+    if (!project || busy || capturing) return;
+    const viewport = view === 'phone' ? 'phone' : 'desktop';
+    const url = new URL(endpoint, window.location.origin);
+    setCapturing(true);
     setError('');
     try {
-      const response = await authFetch(endpoint, { method: 'POST', body: JSON.stringify({ prompt, revision: project.revision }) });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || 'The build could not finish.');
+      const response = await authFetch(`${url.pathname}/screenshot${url.search}`, {
+        method: 'POST', body: JSON.stringify({ viewport, revision: project.revision }),
+      });
+      if (!response.ok) {
+        const problem = await response.json().catch(() => null);
+        throw new Error(problem?.error || 'Could not capture preview.');
+      }
+      setScreenshot({ url: URL.createObjectURL(await response.blob()), viewport, revision: project.revision });
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not capture preview.'); }
+    finally { setCapturing(false); }
+  }
+
+  async function requestBuild(event: FormEvent) {
+    event.preventDefault();
+    if (!project || !prompt.trim() || busy || capturing) return;
+    setBusy(true);
+    setProgress([]);
+    setScreenshot(undefined);
+    setError('');
+    try {
+      const result = await requestBuilderRun<Project>(endpoint, { prompt, revision: project.revision }, event => {
+        setProgress(current => {
+          const prior = current.find(step => step.id === event.id);
+          return prior ? current.map(step => step === prior ? { ...event, detail: event.detail ?? step.detail } : step) : [...current, event];
+        });
+      });
       setProject(result);
       setPrompt('');
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'The build could not finish.'); }
@@ -121,7 +153,7 @@ export default function FeatureBuilderPage({ signedIn, onLogin }: { signedIn: bo
       <div className="mx-auto flex max-w-screen-2xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
         <a href="/" className="inline-flex items-center gap-2 text-sm font-medium"><ArrowLeft size={16} /> Bwenge</a>
         <h1 className="text-lg font-semibold">App Builder</h1>
-        {signedIn && <select aria-label="Workspace" value={workspace} disabled={busy}
+        {signedIn && <select aria-label="Workspace" value={workspace} disabled={busy || capturing}
           onChange={event => { setProject(null); setWorkspace(event.target.value as Workspace); setPrompt(''); }}
           className="min-h-10 rounded-lg border border-slate-300 bg-white px-2 text-sm">
           {Object.entries(workspaces).map(([key, option]) => <option key={key} value={key}>{option.label}</option>)}
@@ -141,10 +173,18 @@ export default function FeatureBuilderPage({ signedIn, onLogin }: { signedIn: bo
             onChange={event => setPrompt(event.target.value)} placeholder={example}
             className="w-full resize-y rounded-lg border border-slate-300 p-3 text-sm focus:outline-indigo-600" />
           <button type="button" className="text-left text-sm text-indigo-700 underline" disabled={busy} onClick={() => setPrompt(example)}>Use example</button>
-          <button className={`${primary} w-full`} disabled={busy || !project || !prompt.trim()}>{busy ? 'Writing and checking code…' : 'Build feature'}</button>
+          <button className={`${primary} w-full`} disabled={busy || capturing || !project || !prompt.trim()}>{busy ? 'Writing and checking code…' : 'Build feature'}</button>
         </form>
         {error && <div className="mt-4 space-y-2 text-sm"><p role="alert" className="text-red-700">{error}</p>
           <button className={button} onClick={() => setReload(value => value + 1)}>Reload project</button></div>}
+        {progress.length > 0 && <ol aria-label="Build progress" aria-live="polite" className="mt-4 space-y-2 border-t border-slate-200 pt-4 text-sm">
+          {progress.map(step => <li key={step.id} className="flex items-start justify-between gap-2">
+            <span>{step.label}{step.detail && <code className="ml-1 break-all text-xs text-slate-500">{step.detail}</code>}</span>
+            <span className={step.state === 'error' ? 'text-red-700' : 'text-slate-600'}>
+              {step.state === 'running' ? 'Running' : step.state === 'done' ? 'Done' : 'Failed'}
+            </span>
+          </li>)}
+        </ol>}
         {project?.summary && <div className="mt-5 border-t border-slate-200 pt-4">
           <h2 className="font-semibold">Build summary</h2>
           <p className="mt-2 whitespace-pre-wrap break-words text-sm text-slate-700">{project.summary}</p>
@@ -156,6 +196,9 @@ export default function FeatureBuilderPage({ signedIn, onLogin }: { signedIn: bo
           <button className={button} aria-pressed={view === 'desktop'} onClick={() => setView('desktop')}><Monitor size={16} /> Desktop</button>
           <button className={button} aria-pressed={view === 'phone'} onClick={() => setView('phone')}><Smartphone size={16} /> Phone</button>
           <button className={button} aria-pressed={view === 'code'} onClick={() => setView('code')}><Code2 size={16} /> Code</button>
+          {project && view !== 'code' && <button className={button} onClick={() => void capture()} disabled={busy || capturing}>
+            <Camera size={16} /> {capturing ? 'Capturing…' : 'Take screenshot'}
+          </button>}
           {project && <button className={button} onClick={() => void downloadProject()}><Download size={16} /> Download project</button>}
           {project && <span className="ml-auto text-xs text-slate-600">{project.revision ? `Revision ${project.revision}` : 'Starter'}</span>}
         </div>
@@ -169,6 +212,13 @@ export default function FeatureBuilderPage({ signedIn, onLogin }: { signedIn: bo
           </div> : <div className="bg-slate-200 p-3">
             <Preview key={`${workspace}:${project.revision}:${reload}`} html={project.preview} phone={view === 'phone'} />
           </div>}
+        {screenshot && <figure className="border-t border-slate-200 p-4">
+          <figcaption className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm">
+            <span>{screenshot.viewport === 'phone' ? 'Phone' : 'Desktop'} screenshot · Revision {screenshot.revision}</span>
+            <a className={button} href={screenshot.url} download={`bwenge-${screenshot.viewport}-r${screenshot.revision}.png`}>Download PNG</a>
+          </figcaption>
+          <img src={screenshot.url} alt="Screenshot of the saved app preview" className="mx-auto max-h-[65vh] max-w-full rounded border border-slate-200 object-contain" />
+        </figure>}
       </section>
     </main>}
   </div>;
