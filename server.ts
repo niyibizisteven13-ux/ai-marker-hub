@@ -79,6 +79,7 @@ import { isPrimary, nodeName, nodeRole } from './server/utils/cluster.js';
 import { closeRedis, getRedis, redisReady } from './server/services/cache/redis.js';
 import { rememberBlocked, takeResumable } from './server/services/billing/pendingRequest.js';
 import { makeEmitter } from './server/utils/sseEmitter.js';
+import featurePublicRoutes from './server/routes/featurePublicRoutes.js';
 import { contentSecurityPolicy } from './server/utils/csp.js';
 import { validateSubmission } from './server/services/forms/validation.js';
 import { normalizeFields } from './server/services/forms/model.js';
@@ -460,6 +461,7 @@ app.use('/api/studio/projects', requireAuth, studioRoutes);
 // Re-enabled: this route was fully unreachable before (import present,
 // mount commented out) — dead code that nothing outside this file could
 // have been hitting.
+app.use('/api/published-app', featurePublicRoutes);
 app.use('/api/agent', requireAuth, generalLimiter, agentRoutes);
 app.use('/api/payments', paymentRoutes);
 // MySEB (device lock). Students' routes for reading/answering a form check the MySEB session first when the form asks for it.

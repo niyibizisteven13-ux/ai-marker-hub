@@ -19,6 +19,7 @@ type Project = {
   changed?: string[];
   history: { revision: number; summary: string }[];
   publishedRevision: number | null;
+  publicRelease: { path: string; revision: number; previousRevision: number | null } | null;
   notes: string;
   usage?: { inputTokens: number; outputTokens: number };
 };
@@ -29,6 +30,8 @@ type RevisionAction =
   | { action: 'edit'; files: Project['files'] }
   | { action: 'restore'; target: number }
   | { action: 'release'; target?: number }
+  | { action: 'publish'; target: number }
+  | { action: 'unpublish' }
   | { action: 'notes'; notes: string };
 
 const button = 'inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-slate-300 px-3 text-sm font-medium disabled:opacity-50';
@@ -96,6 +99,7 @@ export default function FeatureBuilderPage({ signedIn, onLogin }: { signedIn: bo
   const [selection, setSelection] = useState<Selection>();
   const [previewError, setPreviewError] = useState('');
   const [notice, setNotice] = useState('');
+  const [releaseReport, setReleaseReport] = useState('');
   const working = busy || capturing || mutation;
   const projectParam = new URLSearchParams(window.location.search).get('project');
   const endpoint = featureBuilderEndpoint(workspace, isChatAppProject(projectParam) ? projectParam : undefined);
@@ -110,6 +114,7 @@ export default function FeatureBuilderPage({ signedIn, onLogin }: { signedIn: bo
     setSelection(undefined);
     setSelecting(false);
     setNotice('');
+    setReleaseReport('');
     setScreenshots([]);
     setProgress([]);
     setError('');
@@ -167,9 +172,28 @@ export default function FeatureBuilderPage({ signedIn, onLogin }: { signedIn: bo
         setCompareTarget('');
         setComparison(undefined);
       }
-      setNotice(action.action === 'release' ? 'Release saved in this workspace.' :
+      if (action.action === 'publish' || action.action === 'unpublish') setReleaseReport('');
+      setNotice(action.action === 'publish' ? 'Public app updated.' :
+        action.action === 'unpublish' ? 'Public link disabled.' :
+        action.action === 'release' ? 'Release saved in this workspace.' :
         action.action === 'restore' ? 'Restored as a new working revision.' : 'Saved.');
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save the project.'); }
+    finally { setMutation(false); }
+  }
+
+  async function checkRelease() {
+    if (working) return;
+    setMutation(true);
+    setError('');
+    setReleaseReport('');
+    try {
+      const response = await authFetch(revisionUrl('check-release'), {
+        method: 'POST', body: JSON.stringify({ viewport: view === 'phone' ? 'phone' : 'desktop' }),
+      });
+      const report = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(report?.error || 'Could not check the public release.');
+      setReleaseReport(`Revision ${report.revision} · ${report.viewport} · ${report.rendered ? 'Rendered' : 'Blank'} · ${report.runtimeErrors} runtime errors · ${report.horizontalOverflow ? 'Horizontal overflow' : 'Fits viewport'} · ${report.controlsWithoutNames} unnamed controls`);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not check the public release.'); }
     finally { setMutation(false); }
   }
 
@@ -356,6 +380,26 @@ export default function FeatureBuilderPage({ signedIn, onLogin }: { signedIn: bo
               onClick={() => void manage({ action: 'release', target: comparison.revision })}>Roll back workspace release</button>}
           <button className={button} disabled={working || project.publishedRevision === project.revision || !!previewError}
             onClick={() => void manage({ action: 'release' })}>Save workspace release</button>
+        </div>}
+        {project && project.revision > 0 && <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 p-3">
+          {project.publicRelease && <a className={button} href={project.publicRelease.path} target="_blank" rel="noopener noreferrer">
+            Open public app · Revision {project.publicRelease.revision}
+          </a>}
+          <button className={button} disabled={working || project.publicRelease?.revision === project.revision || !!previewError}
+            onClick={() => void manage({ action: 'publish', target: project.revision })}>{project.publicRelease ? 'Publish update' : 'Publish app'}</button>
+          {project.publicRelease?.previousRevision != null && <button className={button} disabled={working}
+            onClick={() => {
+              const target = project.publicRelease?.previousRevision;
+              if (target != null) void manage({ action: 'publish', target });
+            }}>Roll back public app</button>}
+          {project.publicRelease && comparison && comparison.revision > 0 && comparison.revision !== project.publicRelease.revision && comparison.revision !== project.revision &&
+            <button className={button} disabled={working} onClick={() => void manage({ action: 'publish', target: comparison.revision })}>
+              Publish revision {comparison.revision}
+            </button>}
+          {project.publicRelease && <button className={button} disabled={working} onClick={() => void manage({ action: 'unpublish' })}>Unpublish</button>}
+          {project.publicRelease && <button className={button} disabled={working} onClick={() => void checkRelease()}>Check release in browser</button>}
+          {releaseReport && <p role="status" className="basis-full text-sm text-slate-700">{releaseReport}</p>}
+          <p className="basis-full text-xs text-slate-600">Anyone with the public link can open the published revision.</p>
         </div>}
         {previewError && <p role="alert" className="break-words px-3 pt-3 text-sm text-red-700">Preview error · {previewError}</p>}
         {!project ? <p className="p-6 text-sm text-slate-600">{error ? 'Preview unavailable.' : 'Loading project…'}</p>

@@ -62,3 +62,17 @@ test('browser check output requires a completed browser report', async () => {
   });
   assert.throws(() => readBrowserCheck('<div id="root"></div>'), /did not finish/);
 });
+
+test('public releases expose a compiled artifact behind an opaque sandbox', async () => {
+  const { publicReleaseId, publicReleasePath, publicReleaseSchema, publishedAppPolicy } =
+    await import('../server/services/featurePublicRelease.js');
+  const id = 'a'.repeat(32);
+  assert.equal(publicReleaseId.safeParse(id).success, true);
+  assert.equal(publicReleaseId.safeParse('../private').success, false);
+  assert.equal(publicReleasePath(id), `/api/published-app/${id}`);
+  assert.equal(publicReleaseSchema.safeParse({ revision: 0, html: 'draft' }).success, false);
+  assert.equal(publicReleaseSchema.safeParse({ revision: 2, html: '<main>Release</main>' }).success, true);
+  assert.match(publishedAppPolicy, /sandbox allow-scripts;/);
+  assert.doesNotMatch(publishedAppPolicy, /allow-same-origin|allow-top-navigation|allow-forms/);
+  assert.match(publishedAppPolicy, /default-src 'none'/);
+});
