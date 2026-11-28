@@ -1,12 +1,22 @@
 import { z } from 'zod';
 
 export const publicReleaseId = z.string().regex(/^[0-9a-f]{32}$/);
-export const publicReleaseKey = (id: string) => `feature-public-release:${id}`;
+export const publicReleasePrefix = 'feature-public-release:';
+export const publicReleaseKey = (id: string) => `${publicReleasePrefix}${id}`;
 export const publicReleasePath = (id: string) => `/api/published-app/${id}`;
 
 export const publicReleaseSchema = z.object({
   revision: z.number().int().positive(),
   html: z.string().max(1_000_000),
+  monitor: z.object({
+    checkedAt: z.string().datetime(),
+    checks: z.object({
+      rendered: z.boolean(),
+      horizontalOverflow: z.boolean(),
+      runtimeErrors: z.number().int().nonnegative(),
+      controlsWithoutNames: z.number().int().nonnegative(),
+    }).nullable(),
+  }).optional(),
 });
 
 export const publishedAppPolicy = [
