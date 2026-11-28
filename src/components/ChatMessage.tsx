@@ -1,5 +1,7 @@
+import { chatBrowserProject } from '../../shared/featureBrowser';
 import React, { Suspense, lazy, useState } from 'react';
 
+const ChatAppBrowser = lazy(() => import('./ChatAppBrowser'));
 const ChatMarkingCard = lazy(() => import('./ChatMarkingCard'));
 import {
   Check,
@@ -113,6 +115,7 @@ export default function ChatMessage({
   const isUser = message.sender === 'user' || message.role === 'user';
   const messageId: string = message.id ?? '';
   const rawText: string = message.text || message.content || '';
+  const appProject = !isUser && !message.isStreaming ? chatBrowserProject(rawText) : undefined;
   const thinkingText: string = message.thinkingText || '';
   const isThinking: boolean = message.isThinking === true;
   const isGated = message.gated === true;
@@ -374,6 +377,7 @@ export default function ChatMessage({
               </div>
             )}
 
+            {appProject && <Suspense fallback={null}><ChatAppBrowser key={appProject} project={appProject} /></Suspense>}
             <AttachmentCards attachments={message.generatedAttachments} />
 
             {typeof message.examId === 'string' && message.sender === 'assistant' && (
