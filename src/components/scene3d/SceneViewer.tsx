@@ -1,3 +1,4 @@
+import { HandControl } from './HandControl';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
@@ -56,13 +57,15 @@ function stressColor(t: number) {
 
 interface Built { root: THREE.Group; meshes: Map<string, THREE.Mesh>; base: Map<string, { pos: THREE.Vector3; quat: THREE.Quaternion; scale: THREE.Vector3 }>; center: THREE.Vector3; radius: number; labels: CSS2DObject[]; links: Array<{ mesh: THREE.Mesh; from: string; to: string }> }
 
-export default function SceneViewer({ scene, fileName, fill }: { scene: Scene; fileName?: string; fill?: boolean }) {
+export default function SceneViewer({ scene, fileName, fill, onPart }: { scene: Scene; fileName?: string; fill?: boolean; onPart?: (part: ScenePart | null) => void }) {
   const host = useRef<HTMLDivElement>(null);
   const canvasHost = useRef<HTMLDivElement>(null);
   const three = useRef<{
     renderer: THREE.WebGLRenderer; labelRenderer: CSS2DRenderer; camera: THREE.PerspectiveCamera; controls: OrbitControls; walk: PointerLockControls;
     world: THREE.Scene; sunLight: THREE.DirectionalLight; hemi: THREE.HemisphereLight; built: Built; clip: THREE.Plane; ground: THREE.Mesh | null;
   } | null>(null);
+  const isLab = !!onPart;
+  const handPick = useRef<(x:number,y:number) => void>(() => {});
   const [full, setFull] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
@@ -80,6 +83,7 @@ export default function SceneViewer({ scene, fileName, fill }: { scene: Scene; f
   const [quizIndex, setQuizIndex] = useState(0);
   const [quizResult, setQuizResult] = useState<null | { ok: boolean; text: string }>(null);
   const [view, setView] = useState<number | null>(null);
+  const [vrError, setVrError] = useState('');
   const [vr, setVr] = useState(false);
   const [prices, setPrices] = useState<Record<string, number>>({});
   const [webgl, setWebgl] = useState(true);
@@ -91,6 +95,7 @@ export default function SceneViewer({ scene, fileName, fill }: { scene: Scene; f
   const keys = useRef(new Set<string>());
 
   const byId = useMemo(() => new Map(scene.parts.map((p) => [p.id, p])), [scene]);
+  useEffect(() => { onPart?.(selected ? byId.get(selected) ?? null : null); }, [selected,byId,onPart]);
   const hasStress = scene.parts.some((p) => p.stress !== undefined);
   const dynamic = useMemo(() => scene.parts.filter((p) => !p.fixed && (p.velocity || p.mass !== undefined)).map((p) => p.id), [scene]);
   const bom = useMemo(() => billOfMaterials(scene, prices), [scene, prices]);
@@ -230,10 +235,7 @@ export default function SceneViewer({ scene, fileName, fill }: { scene: Scene; f
     const ray = new THREE.Raycaster();
     let down: { x: number; y: number } | null = null;
     const onDown = (e: PointerEvent) => { down = { x: e.clientX, y: e.clientY }; };
-    const onUp = (e: PointerEvent) => {
-      if (!down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 5 || state.current.walking) return;
-      const r = renderer.domElement.getBoundingClientRect();
-      ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera);
+    const selectHit = () => {
       const hits = ray.intersectObjects([...meshes.values()].filter((m) => m.visible), false).filter((h) => {
         const mm = h.object as THREE.Mesh;
         return (mm.material as THREE.MeshStandardMaterial).opacity > 0.2 && clip.distanceToPoint(h.point) >= 0;
@@ -244,6 +246,32 @@ export default function SceneViewer({ scene, fileName, fill }: { scene: Scene; f
         const q = scene.quiz[state.current.quizIndex];
         if (q) setQuizResult(id === q.answerPartId ? { ok: true, text: q.explanation || 'Correct.' } : { ok: false, text: `That is the ${byId.get(id)?.name ?? 'part'}. Try again.` });
       }
+    };
+    const pick = (x: number, y: number) => {
+      ray.setFromCamera(new THREE.Vector2(x*2-1,1-y*2),camera);
+      selectHit();
+    };
+    const controllers = isLab ? [renderer.xr.getController(0), renderer.xr.getController(1)] : [];
+    const releaseControllers = controllers.map(controller => {
+      const beam = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3(0,0,-1.4)]),
+        new THREE.LineBasicMaterial({color:0x8de2dc}),
+      );
+      controller.add(beam);
+      world.add(controller);
+      const select = () => {
+        ray.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+        ray.ray.direction.set(0,0,-1).transformDirection(controller.matrixWorld);
+        selectHit();
+      };
+      controller.addEventListener('select',select);
+      return () => { controller.removeEventListener('select',select); controller.remove(beam); world.remove(controller); beam.geometry.dispose(); beam.material.dispose(); };
+    });
+    handPick.current = pick;
+    const onUp = (e: PointerEvent) => {
+      if (!down || Math.hypot(e.clientX-down.x,e.clientY-down.y)>5 || state.current.walking) return;
+      const rect = renderer.domElement.getBoundingClientRect();
+      pick((e.clientX-rect.left)/rect.width,(e.clientY-rect.top)/rect.height);
     };
     renderer.domElement.addEventListener('pointerdown', onDown);
     renderer.domElement.addEventListener('pointerup', onUp);
@@ -324,6 +352,8 @@ export default function SceneViewer({ scene, fileName, fill }: { scene: Scene; f
     });
 
     return () => {
+      releaseControllers.forEach(release => release());
+      handPick.current = () => {};
       renderer.setAnimationLoop(null);
       ro.disconnect();
       window.removeEventListener('keydown', onKey);
@@ -340,7 +370,7 @@ export default function SceneViewer({ scene, fileName, fill }: { scene: Scene; f
       el.innerHTML = '';
       three.current = null;
     };
-  }, [scene, byId, dynamic]);
+  }, [scene, byId, dynamic, isLab]);
 
   // ── Apply UI state to the 3D objects ──────────────────────────────────────
   useEffect(() => {
@@ -466,8 +496,21 @@ export default function SceneViewer({ scene, fileName, fill }: { scene: Scene; f
     const t = three.current;
     const xr = (navigator as any).xr;
     if (!t || !xr) return;
-    const session = await xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking'] });
-    await t.renderer.xr.setSession(session);
+    setVrError('');
+    try {
+      if (onPart) t.renderer.xr.setReferenceSpaceType('local');
+      const session = await xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking'] });
+      try {
+        await t.renderer.xr.setSession(session);
+        if (onPart) {
+          const { root, radius, center } = t.built;
+          const scale = 0.27 / radius;
+          root.scale.setScalar(scale);
+          root.position.copy(center).multiplyScalar(-scale).add(new THREE.Vector3(0,-0.08,-0.75));
+          session.addEventListener('end', () => { root.scale.setScalar(1); root.position.set(0,0,0); }, { once: true });
+        }
+      } catch (error) { await session.end(); throw error; }
+    } catch { setVrError('Could not start the headset. You can continue in the 3D viewer.'); }
   };
 
   const sel = selected ? byId.get(selected) : null;
@@ -496,6 +539,17 @@ export default function SceneViewer({ scene, fileName, fill }: { scene: Scene; f
 
       <div className={`relative ${full || fill ? 'min-h-[320px] flex-1' : 'h-[420px] sm:h-[480px]'}`}>
         <div ref={canvasHost} className="absolute inset-0 touch-none" />
+        {vrError && <p role="status" className="absolute bottom-2 right-2 rounded bg-black/80 p-2 text-xs text-white">{vrError}</p>}
+        {onPart && <HandControl pick={(x,y) => handPick.current(x,y)} orbit={(dx,dy) => {
+          const t = three.current;
+          if (!t || t.renderer.xr.isPresenting) return;
+          const offset = new THREE.Spherical().setFromVector3(t.camera.position.clone().sub(t.controls.target));
+          offset.theta -= dx*4;
+          offset.phi -= dy*4;
+          offset.makeSafe();
+          t.camera.position.setFromSpherical(offset).add(t.controls.target);
+          t.controls.update();
+        }} />}
 
         {/* Tools */}
         <div className="absolute left-2 right-2 top-2 flex gap-1 overflow-x-auto rounded-xl bg-black/55 p-1 backdrop-blur [scrollbar-width:none] sm:right-auto sm:max-h-[calc(100%-1rem)] sm:flex-col sm:overflow-y-auto sm:overflow-x-hidden">

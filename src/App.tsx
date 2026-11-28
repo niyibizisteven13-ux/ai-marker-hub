@@ -72,6 +72,7 @@ const FormStudioPage = lazyPage(() => import('./pages/FormStudioPage'));
 const ModelPage = lazyPage(() => import('./pages/ModelPage'));
 const LearnPage = lazyPage(() => import('./pages/LearnPage'));
 const TermsPage = lazyPage(() => import('./pages/TermsPage'));
+const LabPage = lazyPage(() => import('./pages/LabPage'));
 const FeatureBuilderPage = lazyPage(() => import('./pages/FeatureBuilderPage'));
 const ResearchPage = lazyPage(() => import('./pages/ResearchPage'));
 const OurStoryPage = lazyPage(() => import('./pages/OurStoryPage'));
@@ -1435,6 +1436,9 @@ export default function App() {
     handleClearStagedAttachments();
   };
 
+  if (/^\/3d-labs\/?$/.test(window.location.pathname)) {
+    return <Suspense fallback={<div className="p-6">Opening 3D Labs…</div>}><LabPage /></Suspense>;
+  }
   if (window.location.pathname === '/model') {
     return <ModelPage />;
   }

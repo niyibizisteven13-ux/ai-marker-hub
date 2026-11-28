@@ -18,13 +18,15 @@ export interface AgentMsg { role: 'user' | 'assistant'; text: string; steps: Ste
 /** The chat renderer is styled for dark surfaces; on a white page its text and tables are recoloured. */
 export const LIGHT_MD = '[&_*]:!text-[#202124] [&_div:has(>table)]:!border-[#E0E0E0] [&_div:has(>table)]:!bg-white [&_div:has(>table)]:!shadow-none [&_th]:!border-[#E0E0E0] [&_th]:!bg-[#F8F9FA] [&_td]:!border-[#F1F3F4]';
 
-export function useAgentChat({ surface, surfaceId, onDone }: { surface: AgentSurface; surfaceId?: string; onDone?: () => void }) {
+export function useAgentChat({ surface, surfaceId, onDone, context }: { context?: string; surface?: AgentSurface; surfaceId?: string; onDone?: () => void }) {
   const [msgs, setMsgs] = useState<AgentMsg[]>([]);
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const abort = useRef<AbortController | null>(null);
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => { end.current?.scrollIntoView({ block: 'end' }); }, [msgs]);
+
+  useEffect(() => () => abort.current?.abort(), []);
 
   const send = async (q: string) => {
     const query = q.trim();
@@ -41,7 +43,7 @@ export function useAgentChat({ surface, surfaceId, onDone }: { surface: AgentSur
     let steps: Step[] = [];
     const files: AttachmentRef[] = [];
     try {
-      const res = await authFetch('/api/ai/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query, history, surface, ...(surfaceId ? { surfaceId } : {}) }), signal: ctl.signal });
+      const res = await authFetch('/api/ai/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: context ? context + '\n\n' + query : query, history, surface, ...(surfaceId ? { surfaceId } : {}) }), signal: ctl.signal });
       if (!res.ok || !res.body) throw new Error((await res.json().catch(() => null))?.error || 'Bwenge could not answer. Please try again.');
       const reader = res.body.getReader();
       const dec = new TextDecoder();
