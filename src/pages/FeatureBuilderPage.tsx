@@ -1,3 +1,4 @@
+import { featureBuilderEndpoint, isChatAppProject } from '../../shared/chatAppBuilder';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { ArrowLeft, Code2, Download, Monitor, Smartphone } from 'lucide-react';
 import { authFetch } from '../utils/authFetch';
@@ -44,7 +45,8 @@ export default function FeatureBuilderPage({ signedIn, onLogin }: { signedIn: bo
   const [reload, setReload] = useState(0);
   const [view, setView] = useState<'desktop' | 'phone' | 'code'>('desktop');
   const [file, setFile] = useState<keyof Project['files']>('App.jsx');
-  const endpoint = `/api/agent/builder/${workspace}`;
+  const projectParam = new URLSearchParams(window.location.search).get('project');
+  const endpoint = featureBuilderEndpoint(workspace, isChatAppProject(projectParam) ? projectParam : undefined);
   const example = workspaces[workspace].example;
 
   useEffect(() => {
@@ -80,14 +82,38 @@ export default function FeatureBuilderPage({ signedIn, onLogin }: { signedIn: bo
     finally { setBusy(false); }
   }
 
-  function download() {
+  async function downloadProject() {
     if (!project) return;
-    const url = URL.createObjectURL(new Blob([project.files[file]], { type: 'text/plain' }));
+    try {
+      const { default: JSZip } = await import('jszip');
+      const zip = new JSZip();
+      zip.file('package.json', JSON.stringify({
+        name: 'bwenge-app', private: true, version: '1.0.0', type: 'module',
+        scripts: { dev: 'vite', build: 'vite build', preview: 'vite preview' },
+        dependencies: { react: '^19.0.1', 'react-dom': '^19.0.1' },
+        devDependencies: { vite: '^6.4.5', '@vitejs/plugin-react': '^4.7.0' },
+      }, null, 2));
+      zip.file('vite.config.js', "import { defineConfig } from 'vite';\nimport react from '@vitejs/plugin-react';\nexport default defineConfig({ plugins: [react()] });\n");
+      zip.file('index.html', '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Bwenge app</title></head><body><div id="root"></div><script type="module" src="/src/main.jsx"></script></body></html>');
+      zip.file('src/main.jsx', "import { createRoot } from 'react-dom/client';\nimport App from './App.jsx';\nimport './styles.css';\ncreateRoot(document.getElementById('root')).render(<App />);\n");
+      for (const [name, source] of Object.entries(project.files)) zip.file(`src/${name}`, source);
+      zip.file('README.md', '# Bwenge app\n\nRun `npm install` and `npm run dev`. For a production build, run `npm run build`.\n');
+      saveDownload(await zip.generateAsync({ type: 'blob' }), 'bwenge-app.zip');
+    } catch { setError('Could not download the app project. Try again.'); }
+  }
+
+  function saveDownload(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = file;
+    link.download = filename;
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1_000);
+  }
+
+  function download() {
+    if (!project) return;
+    saveDownload(new Blob([project.files[file]], { type: 'text/plain' }), file);
   }
 
   return <div className="min-h-[100dvh] bg-slate-100 text-slate-950">
@@ -130,6 +156,7 @@ export default function FeatureBuilderPage({ signedIn, onLogin }: { signedIn: bo
           <button className={button} aria-pressed={view === 'desktop'} onClick={() => setView('desktop')}><Monitor size={16} /> Desktop</button>
           <button className={button} aria-pressed={view === 'phone'} onClick={() => setView('phone')}><Smartphone size={16} /> Phone</button>
           <button className={button} aria-pressed={view === 'code'} onClick={() => setView('code')}><Code2 size={16} /> Code</button>
+          {project && <button className={button} onClick={() => void downloadProject()}><Download size={16} /> Download project</button>}
           {project && <span className="ml-auto text-xs text-slate-600">{project.revision ? `Revision ${project.revision}` : 'Starter'}</span>}
         </div>
         {!project ? <p className="p-6 text-sm text-slate-600">{error ? 'Preview unavailable.' : 'Loading project…'}</p>

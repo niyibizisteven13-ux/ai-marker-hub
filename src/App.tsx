@@ -1,3 +1,4 @@
+import { chatAppLink, chatAppRequest, featureBuilderEndpoint, isChatAppProject } from '../shared/chatAppBuilder';
 import React, { useState, useEffect } from 'react';
 import { PreviewDialog, attachmentSource, type PreviewSource } from './components/FilePreview';
 import { keyOf, thumbnailFor } from './utils/fileKinds';
@@ -976,6 +977,11 @@ export default function App() {
       return;
     }
 
+    const currentSessionId = activeSessionId || `session-${globalThis.crypto.randomUUID()}`;
+    const canBuild = isChatAppProject(currentSessionId);
+    const appLink = chatAppLink(currentSessionId);
+    const hasChatApp = canBuild && messages.some(message => message.sender === 'assistant' && message.text.includes(`[Open app](${appLink})`));
+    const buildInChat = canBuild && !attachment && !options?.marking && chatAppRequest(text, hasChatApp);
     const userMsg: Message = {
       id: 'msg-' + Date.now(),
       sender: 'user',
@@ -1117,115 +1123,132 @@ export default function App() {
         .map((a) => ({ fileId: a.storedFileId as string, name: a.name || 'file' }))
         .slice(-5);
       resetIdleTimeout();
-      const response = await authFetch('/api/ai/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query: fullPrompt,
-          surface: scanBatch?.examId && activeTab === 'marking_hub' ? 'exam' : undefined,
-          surfaceId: scanBatch?.examId && activeTab === 'marking_hub' ? scanBatch.examId : undefined,
-          surfaceSubmissionId: scanBatch?.examId === markingContext?.examId ? markingContext?.submissionId : undefined,
-          surfaceQuestionId: scanBatch?.examId === markingContext?.examId ? markingContext?.questionId : undefined,
-          provider: selectedProvider === 'auto' ? undefined : selectedProvider,
-          // The whole conversation (the server keeps recent turns word for word and condenses older ones).
-          history: requestMessages.slice(-CHAT_HISTORY_MAX_TURNS - 1, -1).filter((message) => message.text?.trim()).map((message) => ({
-            role: message.sender === 'assistant' ? 'assistant' : 'user',
-            text: message.text.length > CHAT_HISTORY_MAX_CHARS ? `${message.text.slice(0, CHAT_HISTORY_MAX_CHARS)}\n[…]` : message.text,
-          })),
-          attachmentText,
-          attachments: attachmentPayloads,
-          attachmentIds: serverAttachmentIds,
-          contextFiles: contextFiles.length ? contextFiles : undefined,
-          answerLanguage: options?.answerLanguage,
-          learning: options?.learning && options.learning.mode !== 'normal' ? options.learning : undefined,
-          marking: options?.marking,
-        }),
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        const errorBody = await response.json().catch(() => null);
-        throw new Error(errorBody?.error || 'Bwenge could not complete your request. Please try again.');
-      }
-
-      if (!response.body) throw new Error('AI service returned an empty stream');
-      handleClearStagedAttachments();
-
       let assistantText = '';
-      let streamBuffer = '';
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      const handleEvent = (line: string) => {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith('data:')) return;
-        const payload = trimmed.slice(5).trim();
-        if (!payload || payload === '[DONE]') return;
-        try {
-          const event = JSON.parse(payload);
-          if (event.type === 'text' && typeof event.text === 'string') {
-            assistantText += event.text;
-            if (event.text.length > 0) {
-              firstTokenReceived = true;
-              resetIdleTimeout();
-            }
-            updateAssistant(assistantText, true);
-          } else if (event.type === 'reset') {
-            assistantText = '';
-            updateAssistant(assistantText, true);
-          } else if (event.type === 'status') {
-            toolSteps = applyStatusEvent(toolSteps, event);
-            updateAssistant(assistantText, true);
-          } else if (event.type === 'tool_call' || event.type === 'tool_result') {
-            toolSteps = applyToolEvent(toolSteps, event);
-            resetIdleTimeout();
-            updateAssistant(assistantText, true);
-          } else if (event.type === 'exam' && typeof event.examId === 'string') {
-            const first = examId !== event.examId;
-            examId = event.examId;
-            updateAssistant(assistantText, true);
-            // Large screens open the live marking panel beside the chat, like an artifact.
-            if (first && window.innerWidth >= 1200) openMarking(event.examId);
-          } else if (event.type === 'files_stored' && Array.isArray(event.files)) {
-            // Remember where the AI stored this message's files, so follow-up questions can use them.
-            const key = (name: string) => String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-            const stored = event.files as Array<{ fileId: string; name: string }>;
-            setMessages((current) => current.map((message) => message.id !== userMsg.id || !message.attachments ? message : {
-              ...message,
-              attachments: message.attachments.map((a) => {
-                const hit = stored.find((f) => key(f.name) === key(a.name));
-                return hit ? { ...a, storedFileId: hit.fileId } : a;
-              }),
-            }));
-          } else if (event.type === 'attachment' && typeof event.id === 'string') {
-            if (!generatedAttachments.some((attachment) => attachment.id === event.id)) {
-              generatedAttachments.push(event as import('./components/types').AttachmentRef);
-            }
-            updateAssistant(assistantText, true);
-          } else if (event.type === 'error') {
-            // The code and request ID let support find this exact failure in the server log.
-            const ref = [event.code, event.requestId].filter((v: unknown) => typeof v === 'string' && v).join(' · ');
-            throw new Error(`${event.message || 'Bwenge could not complete your request. Please try again.'}${ref ? ` (Ref: ${ref})` : ''}`);
-          }
-        } catch (error: any) {
-          if (error instanceof SyntaxError) return;
-          throw error;
-        }
-      };
+      if (buildInChat) {
+        if (temporaryChatMode) throw new Error('Switch off temporary chat to save an app project.');
+        const response = await authFetch(featureBuilderEndpoint('custom', currentSessionId), {
+          method: 'POST',
+          body: JSON.stringify({ prompt: text.trim().replace(/^\/app\s+/i, '') }),
+          signal: controller.signal,
+        });
+        const result = await response.json().catch(() => null);
+        if (!response.ok || !result) throw new Error(result?.error || 'The app build could not finish.');
+        const summary = typeof result.summary === 'string' ? result.summary : '';
+        assistantText = result.revision > 0
+          ? `${result.changed?.length ? `Saved app revision ${result.revision}.` : 'Your last working revision is available.'}\n\n[Open app](${appLink})${summary ? `\n\n${summary}` : ''}`
+          : summary || 'No app changes were saved. Describe the feature you want to build.';
+        firstTokenReceived = true;
+      } else {
+        const response = await authFetch('/api/ai/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            query: fullPrompt,
+            surface: scanBatch?.examId && activeTab === 'marking_hub' ? 'exam' : undefined,
+            surfaceId: scanBatch?.examId && activeTab === 'marking_hub' ? scanBatch.examId : undefined,
+            surfaceSubmissionId: scanBatch?.examId === markingContext?.examId ? markingContext?.submissionId : undefined,
+            surfaceQuestionId: scanBatch?.examId === markingContext?.examId ? markingContext?.questionId : undefined,
+            provider: selectedProvider === 'auto' ? undefined : selectedProvider,
+            // The whole conversation (the server keeps recent turns word for word and condenses older ones).
+            history: requestMessages.slice(-CHAT_HISTORY_MAX_TURNS - 1, -1).filter((message) => message.text?.trim()).map((message) => ({
+              role: message.sender === 'assistant' ? 'assistant' : 'user',
+              text: message.text.length > CHAT_HISTORY_MAX_CHARS ? `${message.text.slice(0, CHAT_HISTORY_MAX_CHARS)}\n[…]` : message.text,
+            })),
+            attachmentText,
+            attachments: attachmentPayloads,
+            attachmentIds: serverAttachmentIds,
+            contextFiles: contextFiles.length ? contextFiles : undefined,
+            answerLanguage: options?.answerLanguage,
+            learning: options?.learning && options.learning.mode !== 'normal' ? options.learning : undefined,
+            marking: options?.marking,
+          }),
+          signal: controller.signal,
+        });
 
-      try {
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          resetIdleTimeout(); // any bytes, including heartbeats, mean the server is still working
-          streamBuffer += decoder.decode(value, { stream: true });
-          const lines = streamBuffer.split('\n');
-          streamBuffer = lines.pop() || '';
-          for (const line of lines) handleEvent(line);
+        if (!response.ok) {
+          const errorBody = await response.json().catch(() => null);
+          throw new Error(errorBody?.error || 'Bwenge could not complete your request. Please try again.');
         }
-        streamBuffer += decoder.decode();
-        if (streamBuffer.trim()) handleEvent(streamBuffer);
-      } finally {
-        reader.releaseLock();
+
+        if (!response.body) throw new Error('AI service returned an empty stream');
+        handleClearStagedAttachments();
+
+        let streamBuffer = '';
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        const handleEvent = (line: string) => {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('data:')) return;
+          const payload = trimmed.slice(5).trim();
+          if (!payload || payload === '[DONE]') return;
+          try {
+            const event = JSON.parse(payload);
+            if (event.type === 'text' && typeof event.text === 'string') {
+              assistantText += event.text;
+              if (event.text.length > 0) {
+                firstTokenReceived = true;
+                resetIdleTimeout();
+              }
+              updateAssistant(assistantText, true);
+            } else if (event.type === 'reset') {
+              assistantText = '';
+              updateAssistant(assistantText, true);
+            } else if (event.type === 'status') {
+              toolSteps = applyStatusEvent(toolSteps, event);
+              updateAssistant(assistantText, true);
+            } else if (event.type === 'tool_call' || event.type === 'tool_result') {
+              toolSteps = applyToolEvent(toolSteps, event);
+              resetIdleTimeout();
+              updateAssistant(assistantText, true);
+            } else if (event.type === 'exam' && typeof event.examId === 'string') {
+              const first = examId !== event.examId;
+              examId = event.examId;
+              updateAssistant(assistantText, true);
+              // Large screens open the live marking panel beside the chat, like an artifact.
+              if (first && window.innerWidth >= 1200) openMarking(event.examId);
+            } else if (event.type === 'files_stored' && Array.isArray(event.files)) {
+              // Remember where the AI stored this message's files, so follow-up questions can use them.
+              const key = (name: string) => String(name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+              const stored = event.files as Array<{ fileId: string; name: string }>;
+              setMessages((current) => current.map((message) => message.id !== userMsg.id || !message.attachments ? message : {
+                ...message,
+                attachments: message.attachments.map((a) => {
+                  const hit = stored.find((f) => key(f.name) === key(a.name));
+                  return hit ? { ...a, storedFileId: hit.fileId } : a;
+                }),
+              }));
+            } else if (event.type === 'attachment' && typeof event.id === 'string') {
+              if (!generatedAttachments.some((attachment) => attachment.id === event.id)) {
+                generatedAttachments.push(event as import('./components/types').AttachmentRef);
+              }
+              updateAssistant(assistantText, true);
+            } else if (event.type === 'error') {
+              // The code and request ID let support find this exact failure in the server log.
+              const ref = [event.code, event.requestId].filter((v: unknown) => typeof v === 'string' && v).join(' · ');
+              throw new Error(`${event.message || 'Bwenge could not complete your request. Please try again.'}${ref ? ` (Ref: ${ref})` : ''}`);
+            }
+          } catch (error: any) {
+            if (error instanceof SyntaxError) return;
+            throw error;
+          }
+        };
+
+        try {
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            resetIdleTimeout(); // any bytes, including heartbeats, mean the server is still working
+            streamBuffer += decoder.decode(value, { stream: true });
+            const lines = streamBuffer.split('\n');
+            streamBuffer = lines.pop() || '';
+            for (const line of lines) handleEvent(line);
+          }
+          streamBuffer += decoder.decode();
+          if (streamBuffer.trim()) handleEvent(streamBuffer);
+        } finally {
+          reader.releaseLock();
+        }
+
       }
 
       if (!assistantText.trim()) throw new Error('The AI service completed without returning a response.');
@@ -1244,7 +1267,6 @@ export default function App() {
 
       if (temporaryChatMode) return;
       const sessionsToSave = [...chatSessions];
-      const currentSessionId = activeSessionId || 'session-' + Date.now();
       setActiveSessionId(currentSessionId);
       const existingSessionIdx = sessionsToSave.findIndex((s) => s.id === currentSessionId);
       const sessionTitle = text.slice(0, 30) + (text.length > 30 ? '...' : '');

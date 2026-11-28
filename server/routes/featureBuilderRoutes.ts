@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { isChatAppProject } from '../../shared/chatAppBuilder.js';
 import { prisma } from '../db.js';
 import { AgentRuntime } from '../services/ai/AgentRuntime.js';
 import { bwengeAgent, fileStore, userAgentTarget } from '../services/AiService.js';
@@ -10,7 +11,7 @@ const router = Router();
 const kindSchema = z.enum(starterNames);
 const requestSchema = z.object({
   prompt: z.string().trim().min(1).max(4_000),
-  revision: z.number().int().nonnegative(),
+  revision: z.number().int().nonnegative().optional(),
 }).strict();
 const storedSchema = z.object({
   revision: z.number().int().positive(),
@@ -19,6 +20,12 @@ const storedSchema = z.object({
 });
 const active = new Set<string>();
 
+function projectKey(userId: string, kind: string, project: unknown) {
+  if (project === undefined) return `feature-builder:${userId}:${kind}`;
+  if (kind === 'custom' && isChatAppProject(project)) return `feature-builder:${userId}:chat:${project}`;
+  return null;
+}
+
 router.use((_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
 
 router.get('/:kind', async (req, res, next) => {
@@ -26,8 +33,10 @@ router.get('/:kind', async (req, res, next) => {
   if (!kind.success) return res.sendStatus(404);
   const userId = (req as any).user?.userId;
   if (!userId) return res.sendStatus(401);
+  const key = projectKey(userId, kind.data, req.query.project);
+  if (!key) return res.status(400).json({ error: 'Invalid app project.' });
   try {
-    const row = await prisma.appSetting.findUnique({ where: { key: `feature-builder:${userId}:${kind.data}` } });
+    const row = await prisma.appSetting.findUnique({ where: { key } });
     const state = row ? storedSchema.parse(row.value) : { revision: 0, files: starterFiles(kind.data), summary: '' };
     res.json({ ...state, preview: await compileFeaturePreview(state.files) });
   } catch (error) { next(error); }
@@ -40,7 +49,10 @@ router.post('/:kind', async (req, res, next) => {
   if (!input.success) return res.status(400).json({ error: 'Enter a feature request of up to 4,000 characters.' });
   const userId = (req as any).user?.userId;
   if (!userId) return res.sendStatus(401);
-  const key = `feature-builder:${userId}:${kind.data}`;
+  const key = projectKey(userId, kind.data, req.query.project);
+  if (!key) return res.status(400).json({ error: 'Invalid app project.' });
+  const fromChat = req.query.project !== undefined && input.data.revision === undefined;
+  if (input.data.revision === undefined && !fromChat) return res.status(400).json({ error: 'Project revision is required.' });
   if (active.has(userId)) return res.status(409).json({ error: 'Your current build is still running.' });
   active.add(userId);
   const abort = new AbortController();
@@ -49,7 +61,7 @@ router.post('/:kind', async (req, res, next) => {
     const row = await prisma.appSetting.findUnique({ where: { key } });
     const state = row ? storedSchema.parse(row.value) : { revision: 0, files: starterFiles(kind.data) };
     const conflict = () => res.status(409).json({ error: 'This project changed in another tab. Reload it and try again.' });
-    if (state.revision !== input.data.revision) return conflict();
+    if (!fromChat && state.revision !== input.data.revision) return conflict();
     const gate = await checkUsage(userId, { kind: 'chat', chars: input.data.prompt.length });
     if (!gate.allowed) return res.status(402).json({ error: gate.message });
     const target = await userAgentTarget(userId, input.data.prompt);
@@ -84,7 +96,7 @@ router.post('/:kind', async (req, res, next) => {
         catch (error) { if ((error as { code?: string })?.code === 'P2002') return conflict(); throw error; }
       }
     }
-    res.json({ revision, files, preview, summary, changed });
+    res.json(fromChat ? { revision, summary, changed } : { revision, files, preview, summary, changed });
   } catch (error) { if (!abort.signal.aborted) next(error); }
   finally { active.delete(userId); }
 });
