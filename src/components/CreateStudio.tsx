@@ -461,6 +461,7 @@ export default function CreateStudio({
                   <input type="checkbox" className="h-3.5 w-3.5 accent-[var(--brand)]" checked={suggestOn} onChange={(e) => { setSuggestOn(e.target.checked); setNextPromptEnabled(e.target.checked); }} />
                   <span>Suggest my next message</span>
                 </label>
+                <a href="/3d-labs" className="flex min-h-11 items-center rounded-xl px-3 text-sm font-medium hover:bg-white/10">Open 3D Labs</a>
                 {/* This Chat Section */}
                 <div className="px-3 pb-1.5 pt-2 font-bold text-[10px] tracking-[.14em] uppercase text-neutral-400">Conversation</div>
                 <button
