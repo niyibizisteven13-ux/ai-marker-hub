@@ -9,7 +9,7 @@ export function screenshotsConfigured() {
   return Boolean(process.env.E2B_API_KEY && process.env.BWENGE_SCREENSHOT_TEMPLATE);
 }
 
-async function browserSandbox() {
+export async function browserSandbox() {
   const template = process.env.BWENGE_SCREENSHOT_TEMPLATE;
   if (!template || !screenshotsConfigured()) throw new Error('Screenshot environment is unavailable.');
   return Sandbox.create(template, {

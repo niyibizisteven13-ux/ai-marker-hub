@@ -1,3 +1,4 @@
+import { browserRequestSchema, runFeatureBrowser } from './featureBrowser.js';
 import { createRequire } from 'node:module';
 import { build, transform } from 'esbuild';
 import { checkFeatureBrowser, renderFeatureScreenshot, screenshotsConfigured, screenshotSizes } from './featureScreenshot.js';
@@ -58,6 +59,29 @@ export function featureBuilderTools(files: ProjectFiles) {
         if (++browserRuns > 2) return { text: 'Browser run limit reached for this task.', isError: true };
         const checks = await checkFeatureBrowser(await compileFeaturePreview(files), viewport);
         return { text: JSON.stringify(checks), isError: !checks.rendered || checks.runtimeErrors > 0 };
+      },
+    });
+    tools.add({
+      definition: {
+        name: 'interact_with_project_preview',
+        description: 'Replay up to 12 ordered browser actions on the draft and inspect the result. Clicks use normalized image coordinates from 0 to below 1. Use sample inputs.',
+        parameters: {
+          type: 'object', required: ['viewport', 'actions'], additionalProperties: false,
+          properties: {
+            viewport: { type: 'string', enum: Object.keys(screenshotSizes) },
+            actions: { type: 'array', maxItems: 12, items: { type: 'object' } },
+          },
+        },
+      },
+      execute: async input => {
+        const request = browserRequestSchema.safeParse(input);
+        if (!request.success) return { text: 'Use click with x and y, type with text, or scroll with direction up or down.', isError: true };
+        if (++browserRuns > 2) return { text: 'Browser run limit reached for this task.', isError: true };
+        const result = await runFeatureBrowser(await compileFeaturePreview(files), request.data);
+        return {
+          text: result.diagnostics.length ? JSON.stringify(result.diagnostics) : 'No browser diagnostics reported.',
+          images: [{ mime: 'image/png', base64: result.png.toString('base64') }],
+        };
       },
     });
     tools.add({

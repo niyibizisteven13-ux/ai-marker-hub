@@ -85,3 +85,17 @@ test('builder accepts a single scoped public content source', async () => {
   assert.equal(featureConnectionSchema.safeParse({ kind: 'profile', id: '../private' }).success, false);
   assert.equal(featureConnectionSchema.safeParse({ kind: 'research', id: 'paper-1', ownerId: 'someone-else' }).success, false);
 });
+
+test('cloud browser accepts bounded interactions and resolves the chat app link', async () => {
+  const { Script } = await import('node:vm');
+  const { browserRequestSchema, featureBrowserDriver } = await import('../server/services/featureBrowser.js');
+  const { browserActionLimit, chatBrowserProject } = await import('../shared/featureBrowser.js');
+  assert.doesNotThrow(() => new Script(featureBrowserDriver));
+  const click = { type: 'click', x: 0.25, y: 0.5 };
+  assert.equal(browserRequestSchema.safeParse({ viewport: 'phone', actions: [click] }).success, true);
+  assert.equal(browserRequestSchema.safeParse({ viewport: 'phone', actions: [{ ...click, x: 1 }] }).success, false);
+  assert.equal(browserRequestSchema.safeParse({ viewport: 'phone', actions: Array(browserActionLimit + 1).fill(click) }).success, false);
+  assert.equal(browserRequestSchema.safeParse({ viewport: 'phone', url: 'https://example.com', actions: [] }).success, false);
+  assert.equal(chatBrowserProject('Saved app revision 2.\n\n[Open app](/builder?workspace=custom&project=session-test)'), 'session-test');
+  assert.equal(chatBrowserProject('[Open app](https://example.com/builder?workspace=custom&project=session-test)'), undefined);
+});
