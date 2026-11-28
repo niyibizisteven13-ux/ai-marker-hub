@@ -18,6 +18,12 @@ type Project = {
   changed?: string[];
 };
 
+const startingIdeas = [
+  { label: 'Create a booking form', prompt: 'Create a booking form where clients choose a service and request a date.' },
+  { label: 'Build a meal card', prompt: 'Build a meal card that tracks breakfast, lunch and dinner visits with sample customers.' },
+  { label: 'Make a portfolio', prompt: 'Make a portfolio with project images, descriptions and a contact section.' },
+];
+
 const button = 'inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-slate-300 px-3 text-sm font-medium disabled:opacity-50';
 const primary = 'inline-flex min-h-11 items-center justify-center rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50';
 
@@ -140,7 +146,17 @@ export default function FeatureBuilderPage({ signedIn, onLogin }: { signedIn: bo
           <textarea id="feature-prompt" rows={5} maxLength={4000} value={prompt} disabled={busy}
             onChange={event => setPrompt(event.target.value)} placeholder={example}
             className="w-full resize-y rounded-lg border border-slate-300 p-3 text-sm focus:outline-indigo-600" />
-          <button type="button" className="text-left text-sm text-indigo-700 underline" disabled={busy} onClick={() => setPrompt(example)}>Use example</button>
+          {workspace === 'custom' && project?.revision === 0 ? (
+            <div aria-label="Starting ideas" role="group" className="flex flex-wrap gap-2">
+              {startingIdeas.map(idea => (
+                <button key={idea.label} type="button" className={button} disabled={busy}
+                  onClick={() => setPrompt(idea.prompt)}>{idea.label}</button>
+              ))}
+            </div>
+          ) : (
+            <button type="button" className="text-left text-sm text-indigo-700 underline" disabled={busy}
+              onClick={() => setPrompt(example)}>Use example</button>
+          )}
           <button className={`${primary} w-full`} disabled={busy || !project || !prompt.trim()}>{busy ? 'Writing and checking code…' : 'Build feature'}</button>
         </form>
         {error && <div className="mt-4 space-y-2 text-sm"><p role="alert" className="text-red-700">{error}</p>
