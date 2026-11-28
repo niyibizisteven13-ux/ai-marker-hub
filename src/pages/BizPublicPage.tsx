@@ -10,36 +10,56 @@ export default function BizPublicPage({ slug }: { slug: string }) {
   const [state, setState] = useState<{ business: PublicBusiness; openNow: boolean | null } | 'loading' | 'missing' | 'error'>('loading');
   useEffect(() => {
     let alive = true;
-    const load = () => publicApi.page(slug).then((p) => { if (alive) { setState(p); const isProfile = p.business.category === 'profile'; document.title = isProfile ? profileSearch(p.business).title : p.business.name + ' · Bwenge'; } }).catch((e) => { if (alive) setState(e instanceof BizApiError && e.status === 404 ? 'missing' : 'error'); });
-    void load();
-    const reconnect = () => { void load(); };
-    window.addEventListener('online', reconnect);
-    return () => { alive = false; window.removeEventListener('online', reconnect); };
-  }, [slug]);
-  useEffect(() => {
-    let alive = true;
-    let pending = false;
-    const refreshBadge = async () => {
-      if (pending || document.visibilityState !== 'visible') return;
-      pending = true;
+    let version: string | undefined;
+    let checking = false;
+    let loading = false;
+    const load = async (refresh = false) => {
+      if (loading) return;
+      loading = true;
       try {
-        const { verified } = await publicApi.badge(slug);
-        if (alive) setState((current) => {
-          if (typeof current === 'string' || current.business.slug !== slug || Boolean(current.business.verified) === verified) return current;
-          return { ...current, business: { ...current.business, verified: verified ? true : undefined } };
-        });
-      } catch {
-        // Keep the last visible state if a refresh fails.
-      } finally {
-        pending = false;
-      }
+        const page = await publicApi.page(slug, refresh);
+        if (!alive) return;
+        version = page.business.updatedAt;
+        setState(page);
+        const business = page.business;
+        document.title = business.category === 'profile' ? profileSearch(business).title : business.name + ' · Bwenge';
+      } catch (error) {
+        if (!alive) return;
+        if (error instanceof BizApiError && error.status === 404) setState('missing');
+        else if (!version) setState('error');
+      } finally { loading = false; }
     };
-    const timer = window.setInterval(refreshBadge, 15_000);
-    document.addEventListener('visibilitychange', refreshBadge);
+    const refresh = () => { void load(true); };
+    const check = async () => {
+      if (checking || document.visibilityState !== 'visible') return;
+      checking = true;
+      try {
+        const status = await publicApi.badge(slug);
+        if (!alive) return;
+        if (!version || (status.updatedAt && version !== status.updatedAt)) {
+          await load(true);
+          return;
+        }
+        setState(current => {
+          if (typeof current === 'string' || current.business.slug !== slug || Boolean(current.business.verified) === status.verified) return current;
+          return { ...current, business: { ...current.business, verified: status.verified ? true : undefined } };
+        });
+      } catch (error) {
+        if (alive && error instanceof BizApiError && error.status === 404) setState('missing');
+      } finally { checking = false; }
+    };
+    void load();
+    const channel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel(`bwenge-page:${slug}`) : undefined;
+    if (channel) channel.onmessage = refresh;
+    const timer = window.setInterval(check, 15_000);
+    window.addEventListener('online', refresh);
+    document.addEventListener('visibilitychange', check);
     return () => {
       alive = false;
+      channel?.close();
       window.clearInterval(timer);
-      document.removeEventListener('visibilitychange', refreshBadge);
+      window.removeEventListener('online', refresh);
+      document.removeEventListener('visibilitychange', check);
     };
   }, [slug]);
   const loadedSlug = typeof state === 'string' ? undefined : state.business.slug;

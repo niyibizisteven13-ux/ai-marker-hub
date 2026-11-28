@@ -93,6 +93,27 @@ test('only the owner can apply an approved design and it updates the public page
   assert.equal(manifest.start_url, '/b/design-cafe?source=app');
 });
 
+test('a connected profile accepts owner-approved headline and bio edits', async () => {
+  const owner = await mkUser('connected-profile-owner');
+  const other = await mkUser('connected-profile-other');
+  const { business: profile } = await (await call('/', { token: owner, body: { name: 'Connected Portfolio', category: 'profile' } })).json();
+  await call(`/${profile.id}`, { method: 'PATCH', token: owner, body: { profile: { headline: 'Student', skills: ['Design'] }, about: 'Learning design' } });
+  const { business } = await (await call(`/${profile.id}/publish`, { token: owner, body: { on: true } })).json();
+  const path = `/${profile.id}/customer-design`;
+  const draft = { version: business.updatedAt, design: { headline: 'Design student', about: 'I study design.' } };
+  assert.equal((await call(path, { method: 'PUT', token: other, body: draft })).status, 404);
+  assert.equal((await call(path, { method: 'PUT', token: owner, body: { ...draft, design: { appName: 'Invalid profile app' } } })).status, 400);
+  const applied = await call(path, { method: 'PUT', token: owner, body: draft });
+  assert.equal(applied.status, 200);
+  const page = await (await call('/public/connected-portfolio?refresh=1')).json();
+  assert.equal(page.business.profile.headline, 'Design student');
+  assert.deepEqual(page.business.profile.skills, ['Design']);
+  assert.equal(page.business.about, 'I study design.');
+  const status = await (await call('/public/connected-portfolio/badge')).json();
+  assert.equal(status.updatedAt, page.business.updatedAt);
+  assert.equal((await call(`/${profile.id}/stats`, { token: owner }).then(r => r.json())).last30.views, 0);
+});
+
 test('the share preview carries the business’s own words, escaped, and its cover photo', () => {
   const b: any = { slug: 'mama-grace', name: 'Mama <Grace> & "Sons"', category: 'restaurant', tagline: 'Fresh </title><script>alert(1)</script>', about: '', theme: 'gold', contact: {}, hours: [], products: [], gallery: [], cover: { id: 'c1', kind: 'image' }, updatedAt: 'x' };
   const html = renderShell('<html><head><title>Bwenge</title><meta name="description" content="old" /></head><body></body></html>', b, 'https://www.bwenge.space/');

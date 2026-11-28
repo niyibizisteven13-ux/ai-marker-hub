@@ -1,3 +1,4 @@
+import CustomerDesign from '../components/biz/CustomerDesign';
 import { initialStudioLang, saveStudioLang, setStudioLang, tx, type StudioLang } from '../biz/studioI18n';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Table2, Megaphone, MapPin, Sparkles, Bot, ArrowLeft, BarChart3, Check, ExternalLink, Eye, EyeOff, Film, Globe, ImagePlus, Inbox, KeyRound, LayoutDashboard, Loader2, MessageCircle, MoreHorizontal, Package, Palette, Plus, Receipt, Settings, ShoppingBag, Store, Trash2, Upload, Users, UserRound, UtensilsCrossed } from 'lucide-react';
@@ -277,7 +278,7 @@ function SettingsTab({ b, urls, onChange, onDeleted }: { b: Business; urls: Reco
 }
 
 /* ------------------------------------------------------------------ the workspace */
-type View = 'profile' | 'programs' | 'trackers' | 'feed' | 'chat' | 'agent' | 'dashboard' | 'sales' | 'expenses' | 'products' | 'customers' | 'reports' | 'messages' | 'public' | 'secrets' | 'settings';
+type View = 'design' | 'profile' | 'programs' | 'trackers' | 'feed' | 'chat' | 'agent' | 'dashboard' | 'sales' | 'expenses' | 'products' | 'customers' | 'reports' | 'messages' | 'public' | 'secrets' | 'settings';
 const NAV: Array<{ id: View; label: string; icon: typeof Globe; group?: string }> = [
   { id: 'profile', label: 'My profile', icon: UserRound }, { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard }, { id: 'chat', label: 'Ask the agent', icon: Sparkles }, { id: 'sales', label: 'Sales and orders', icon: ShoppingBag }, { id: 'expenses', label: 'Costs and spending', icon: Receipt },
   { id: 'programs', label: 'Programs', icon: UtensilsCrossed }, { id: 'products', label: 'Products and stock', icon: Package }, { id: 'customers', label: 'Customers', icon: Users }, { id: 'reports', label: 'Reports', icon: BarChart3 },
@@ -289,11 +290,13 @@ const LIGHT = { '--app-bg': '#F2F5FA', '--app-panel': '#FFFFFF', '--app-panel-ho
 export default function BizStudioPage({ onBack }: { onBack: () => void }) {
   const [slang, setSlang] = useState<StudioLang>(initialStudioLang); setStudioLang(slang);
   const pickLang = (l: StudioLang) => { setSlang(l); saveStudioLang(l); void ownerApi.setPrefs({ studioLang: l }).catch(() => undefined); };
-  const [mine, setMine] = useState<Mine | null>(null); const [error, setError] = useState(''); const [sel, setSel] = useState(''); const [view, setView] = useState<View>(() => { const v = new URLSearchParams(window.location.search).get('view'); return (['profile', 'trackers', 'feed', 'chat', 'agent', 'sales', 'expenses', 'products', 'customers', 'reports', 'messages', 'public', 'secrets', 'settings'] as string[]).includes(v ?? '') ? (v as View) : 'dashboard'; }); const [sub, setSub] = useState<'page' | 'gallery' | 'preview'>('page');
+  const [mine, setMine] = useState<Mine | null>(null); const [error, setError] = useState(''); const [sel, setSel] = useState(''); const [view, setView] = useState<View>(() => { const v = new URLSearchParams(window.location.search).get('view'); return (['design', 'profile', 'trackers', 'feed', 'chat', 'agent', 'sales', 'expenses', 'products', 'customers', 'reports', 'messages', 'public', 'secrets', 'settings'] as string[]).includes(v ?? '') ? (v as View) : 'dashboard'; }); const [sub, setSub] = useState<'page' | 'gallery' | 'preview'>('page');
   const [urls, setUrls] = useState<Record<string, string>>({}); const [secrets, setSecrets] = useState<SecretsStatus | null>(null); const [sheet, setSheet] = useState<EntryKind | null>(null); const [more, setMore] = useState(false);
   const profileRoute = /^\/profile\/?$/.test(window.location.pathname);
   const [creating, setCreating] = useState({ name: '', category: profileRoute ? 'profile' : 'shop', whatsapp: '', lat: '', lng: '' }); const [adding, setAdding] = useState(false); const [busy, setBusy] = useState(false); const [tick, setTick] = useState(0);
-  const load = useCallback(async () => { try { const m = await ownerApi.mine(); setMine(m); if (m.prefs?.studioLang) { setSlang(m.prefs.studioLang); saveStudioLang(m.prefs.studioLang); } setSel((s) => { if (m.businesses.some((b) => b.id === s)) return s; const want = new URLSearchParams(window.location.search).get('page'); return m.businesses.find((b) => b.id === want)?.id ?? m.businesses.find((b) => (b.category === 'profile') === profileRoute)?.id ?? ''; }); } catch (e) { setError(msg(e)); } }, [profileRoute]);
+  const load = useCallback(async () => { try { const m = await ownerApi.mine(); setMine(m); if (m.prefs?.studioLang) { setSlang(m.prefs.studioLang); saveStudioLang(m.prefs.studioLang); } setSel((s) => { if (m.businesses.some((b) => b.id === s)) return s; const want = new URLSearchParams(window.location.search).get('page'); const selected = m.businesses.find((b) => b.id === want && (b.category === 'profile') === profileRoute);
+    if (new URLSearchParams(window.location.search).get('view') === 'design') return selected?.id ?? '';
+    return selected?.id ?? m.businesses.find((b) => (b.category === 'profile') === profileRoute)?.id ?? ''; }); } catch (e) { setError(msg(e)); } }, [profileRoute]);
   useEffect(() => { document.title = profileRoute ? 'Bwenge4Profile · Bwenge' : 'Ventures · Bwenge'; void load(); }, [load, profileRoute]);
   const b = mine?.locked ? null : mine?.businesses.find((x) => x.id === sel) ?? null;
   useEffect(() => { if (b) void ownerApi.mediaUrls(b.id).then(setUrls).catch(() => undefined); else setUrls({}); }, [b?.id, b?.updatedAt]);
@@ -307,6 +310,10 @@ export default function BizStudioPage({ onBack }: { onBack: () => void }) {
   const create = async (e: React.FormEvent) => { e.preventDefault(); setBusy(true); setError(''); try { const r = await ownerApi.create({ name: creating.name, category: creating.category }); const extra: Record<string, unknown> = {}; if (creating.whatsapp.trim()) extra.whatsapp = creating.whatsapp; if (creating.lat && creating.lng) { extra.lat = creating.lat; extra.lng = creating.lng; } if (Object.keys(extra).length) await ownerApi.update(r.business.id, extra).catch(() => undefined); await load(); setSel(r.business.id); setAdding(false); setView(creating.category === 'profile' ? 'profile' : 'dashboard'); } catch (x) { setError(msg(x)); } finally { setBusy(false); } };
 
   if (!mine && !error) return <div className="flex min-h-[100dvh] items-center justify-center bg-[#F2F5FA]"><Loader2 className="animate-spin text-[var(--brand)]" /></div>;
+  if (view === 'design' && !b && !mine?.locked) return <main style={LIGHT} className="min-h-[100dvh] bg-[var(--app-bg)] p-6 text-[var(--app-text)]">
+    <p role="alert">{error || 'This connected page is unavailable.'}</p>
+    <a href="/settings?tab=connections" className="mt-3 inline-block underline">Back to Connections</a>
+  </main>;
   /** The owner's own name for the programs section, when they have chosen one. */
   const navLabel = (n: { id: View; label: string }) => (n.id === 'programs' && b?.programText?.programs ? b.programText.programs : n.id === 'programs' && b?.programText?.program ? plural(b.programText.program) : tx(n.label));
   const kind = kindOf(b?.category ?? 'other'); const NAVK = KIND_NAV[kind].map(([id, label]) => ({ ...NAV.find((x) => x.id === id)!, label })); const phoneNav = KIND_PHONE[kind] as View[];
@@ -365,6 +372,7 @@ export default function BizStudioPage({ onBack }: { onBack: () => void }) {
               {view === 'programs' && <ProgramsView b={b} onChange={reload} />}
               {view === 'trackers' && <TrackersView b={b} onChange={reload} />}
               {view === 'feed' && <FeedView b={b} onChange={reload} canVideo={mine.limits.videos > 0} />}
+              {view === 'design' && <CustomerDesign key={b.id} business={b} onChange={reload} onClose={() => go('dashboard')} />}
               {view === 'chat' && <AgentChatView b={b} onChange={reload} />}
               {view === 'agent' && <AgentView b={b} paid={mine.paid !== false} />}
               {view === 'secrets' && <SecretsView b={b} secrets={secrets} paid={mine.paid !== false} reload={() => { loadSecrets(); void load(); }} />}
