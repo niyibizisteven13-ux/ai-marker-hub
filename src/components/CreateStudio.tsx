@@ -34,7 +34,6 @@ import { LearningModeBanner, LearningModePicker, speakText, speechLang, useLearn
 import type { LearningSettings } from '../lib/learning/presets';
 import { Message as MessageType, ChatAttachment, ResponseFeedbackDetails } from '../types';
 import ChatMessage from './ChatMessage';
-import { StarterCards } from './StarterCards';
 import logoUrl from '../assets/bwenge-logo.svg';
 
 interface CreateStudioProps {
@@ -89,10 +88,6 @@ export default function CreateStudio({
   onLoadSession,
   onOpenSettings,
   onOpenForms,
-  onOpenPublicLibrary,
-  onOpenBiz,
-  onOpenFormsLibrary,
-  onOpenTasks,
   onDeleteChat,
   onExportChat,
   onShare,
@@ -116,7 +111,6 @@ export default function CreateStudio({
   onFeedback,
   onRetry,
   onUpgradeClick,
-  userName,
   user,
   onOpenLoginModal,
 }: CreateStudioProps) {
@@ -367,13 +361,6 @@ export default function CreateStudio({
 
   const firstUserMessage = messages.find((m) => m.sender === 'user')?.text || '';
   const truncatedTitle = firstUserMessage.length > 40 ? firstUserMessage.slice(0, 40) + '...' : firstUserMessage;
-
-  const getGreeting = () => {
-    const hour = new Date().getHours();
-    const kinyarwandaGreeting = hour < 12 ? 'Mwaramutse' : 'Mwiriwe';
-    const firstName = userName || (user?.name ? user.name.split(' ')[0] : null);
-    return firstName ? `${kinyarwandaGreeting}, ${firstName}` : kinyarwandaGreeting;
-  };
 
   // Roleplay: read each finished reply aloud in the practice language.
   const wasTyping = useRef(false);
@@ -636,7 +623,7 @@ export default function CreateStudio({
         onKeyDown={markUserScroll}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-hidden relative"
       >
-        <div className="mx-auto w-full max-w-2xl flex flex-col gap-6 px-4 py-6">
+        <div className={`mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6 ${messages.length === 0 ? 'min-h-full justify-center' : ''}`}>
           {messages.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-4 text-center sm:py-10 lg:py-16 animate-in fade-in duration-300">
               {/* Logo Mark */}
@@ -644,26 +631,9 @@ export default function CreateStudio({
                 <img src={logoUrl} alt="Bwenge Logo" className="w-full h-full object-cover" />
               </div>
 
-              {/* Greeting */}
-              <h1 className="mb-5 font-display text-[26px] font-normal tracking-tight text-[var(--app-text)] sm:mb-7 sm:text-[32px]">
-                {getGreeting()}
+              <h1 className="font-display text-[26px] font-normal tracking-tight text-[var(--app-text)] sm:text-[32px]">
+                What’s on your mind?
               </h1>
-
-              {user && (
-                <StarterCards
-                  key={user.id}
-                  userId={user.id}
-                  onOpenPublicLibrary={onOpenPublicLibrary}
-                  onOpenBiz={onOpenBiz}
-                  onOpenForms={onOpenFormsLibrary}
-                  onOpenTasks={onOpenTasks}
-                  onStartTutor={() => {
-                    if (learning.mode !== 'socratic') setLearning({ mode: 'socratic' });
-                    textareaRef.current?.focus();
-                  }}
-                  tutorActive={learning.mode === 'socratic'}
-                />
-              )}
             </div>
           ) : (
             messages.map((msg, idx) => (
