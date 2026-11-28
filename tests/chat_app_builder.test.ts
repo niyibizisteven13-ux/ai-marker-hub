@@ -76,3 +76,12 @@ test('public releases expose a compiled artifact behind an opaque sandbox', asyn
   assert.doesNotMatch(publishedAppPolicy, /allow-same-origin|allow-top-navigation|allow-forms/);
   assert.match(publishedAppPolicy, /default-src 'none'/);
 });
+
+test('builder accepts a single scoped public content source', async () => {
+  const { featureConnectionSchema } = await import('../server/services/featureConnection.js');
+  assert.deepEqual(featureConnectionSchema.parse({ kind: 'business', id: 'demo-restaurant' }), {
+    kind: 'business', id: 'demo-restaurant',
+  });
+  assert.equal(featureConnectionSchema.safeParse({ kind: 'profile', id: '../private' }).success, false);
+  assert.equal(featureConnectionSchema.safeParse({ kind: 'research', id: 'paper-1', ownerId: 'someone-else' }).success, false);
+});

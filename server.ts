@@ -3062,6 +3062,7 @@ async function startServer() {
     // Recover persisted background jobs and start periodic cleanup of expired jobs/artifacts.
     startPlatformSettings();
     startMySebSync();
+    if (isPrimary()) void import('./server/services/featureReleaseMonitor.js').then(m => m.startFeatureReleaseMonitor());
     if (isPrimary()) void import('./server/services/mySebAgent.js').then((m) => m.startMySebAgent());
     if (isPrimary()) void import('./server/services/agenda/runner.js').then((m) => m.startAgenda());
     startEducationRuntime().catch((err) => logger.error('Background job runtime failed to start', { errorType: err?.name }));

@@ -19,6 +19,7 @@ type Project = {
   changed?: string[];
   history: { revision: number; summary: string }[];
   publishedRevision: number | null;
+  monitor?: { checkedAt: string; checks: { rendered: boolean; runtimeErrors: number; horizontalOverflow: boolean } | null };
   publicRelease: { path: string; revision: number; previousRevision: number | null } | null;
   notes: string;
   usage?: { inputTokens: number; outputTokens: number };
@@ -80,6 +81,7 @@ export default function FeatureBuilderPage({ signedIn, onLogin }: { signedIn: bo
   });
   const [project, setProject] = useState<Project | null>(null);
   const [prompt, setPrompt] = useState('');
+  const [connectionId, setConnectionId] = useState('');
   const [mode, setMode] = useState<'quick' | 'standard'>('standard');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -88,7 +90,7 @@ export default function FeatureBuilderPage({ signedIn, onLogin }: { signedIn: bo
   const [screenshots, setScreenshots] = useState<{ url: string; viewport: 'desktop' | 'phone'; revision: number }[]>([]);
   const screenshotUrls = useRef(new Set<string>());
   const [reload, setReload] = useState(0);
-  const [view, setView] = useState<'desktop' | 'phone' | 'code'>('desktop');
+  const [view, setView] = useState<'desktop' | 'phone' | 'code' | 'terminal'>('desktop');
   const [file, setFile] = useState<keyof Project['files']>('App.jsx');
   const [source, setSource] = useState<Project['files']>();
   const [notes, setNotes] = useState('');
@@ -99,8 +101,11 @@ export default function FeatureBuilderPage({ signedIn, onLogin }: { signedIn: bo
   const [selection, setSelection] = useState<Selection>();
   const [previewError, setPreviewError] = useState('');
   const [notice, setNotice] = useState('');
+  const [command, setCommand] = useState('');
+  const [terminalLog, setTerminalLog] = useState('');
+  const [terminalBusy, setTerminalBusy] = useState(false);
   const [releaseReport, setReleaseReport] = useState('');
-  const working = busy || capturing || mutation;
+  const working = busy || capturing || mutation || terminalBusy;
   const projectParam = new URLSearchParams(window.location.search).get('project');
   const endpoint = featureBuilderEndpoint(workspace, isChatAppProject(projectParam) ? projectParam : undefined);
   const example = workspaces[workspace].example;
@@ -114,6 +119,9 @@ export default function FeatureBuilderPage({ signedIn, onLogin }: { signedIn: bo
     setSelection(undefined);
     setSelecting(false);
     setNotice('');
+    setTerminalLog('');
+    setCommand('');
+    setConnectionId('');
     setReleaseReport('');
     setScreenshots([]);
     setProgress([]);
@@ -197,6 +205,24 @@ export default function FeatureBuilderPage({ signedIn, onLogin }: { signedIn: bo
     finally { setMutation(false); }
   }
 
+  async function runTerminal(action: 'run' | 'reset', text = command) {
+    if (!project || working || (action === 'run' && !text.trim())) return;
+    setTerminalBusy(true);
+    setError('');
+    try {
+      const response = await authFetch(revisionUrl('terminal'), {
+        method: 'POST',
+        body: JSON.stringify({ action, revision: project.revision, ...(action === 'run' ? { command: text } : {}) }),
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(result?.error || 'Terminal request failed.');
+      if (action === 'reset') setTerminalLog(result.output);
+      else setTerminalLog(log => `${log}\n$ ${text}\n${result.output}\n[Exit ${result.exitCode}]\n`.slice(-40_000));
+      setCommand('');
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Terminal request failed.'); }
+    finally { setTerminalBusy(false); }
+  }
+
   async function compare(revision: string) {
     setCompareTarget(revision);
     setComparison(undefined);
@@ -240,7 +266,8 @@ export default function FeatureBuilderPage({ signedIn, onLogin }: { signedIn: bo
     setError('');
     try {
       const request = selection ? `Selected preview element: ${JSON.stringify(selection)}\n\n${prompt}`.slice(0, 4_000) : prompt;
-      const result = await requestBuilderRun<Project>(endpoint, { prompt: request, revision: project.revision, mode }, event => {
+      const connection = workspace !== 'custom' && connectionId.trim() ? { kind: workspace, id: connectionId.trim() } : undefined;
+      const result = await requestBuilderRun<Project>(endpoint, { prompt: request, revision: project.revision, mode, connection }, event => {
         setProgress(current => {
           const prior = current.find(step => step.id === event.id);
           return prior ? current.map(step => step === prior ? { ...event, detail: event.detail ?? step.detail } : step) : [...current, event];
@@ -317,6 +344,12 @@ export default function FeatureBuilderPage({ signedIn, onLogin }: { signedIn: bo
             <button className={button} type="button" onClick={() => setSelection(undefined)}>Clear</button>
           </div>}
           <button type="button" className="text-left text-sm text-indigo-700 underline" disabled={busy} onClick={() => setPrompt(example)}>Use example</button>
+          {workspace !== 'custom' && <label className="block text-sm">
+            Published {workspace === 'research' ? 'paper ID' : 'page slug'} (optional)
+            <input className="mt-1 w-full rounded-lg border border-slate-300 p-2" value={connectionId} maxLength={90}
+              pattern="[a-zA-Z0-9_-]+" onChange={event => setConnectionId(event.target.value)} disabled={working} />
+            <span className="mt-1 block text-xs text-slate-600">Use current public content from a page you own in this build.</span>
+          </label>}
           <label className="flex items-center justify-between gap-2 text-sm">
             Build mode
             <select className={button} value={mode} disabled={working} onChange={event => setMode(event.target.value === 'quick' ? 'quick' : 'standard')}>
@@ -358,10 +391,11 @@ export default function FeatureBuilderPage({ signedIn, onLogin }: { signedIn: bo
           <button className={button} aria-pressed={view === 'desktop'} onClick={() => setView('desktop')}><Monitor size={16} /> Desktop</button>
           <button className={button} aria-pressed={view === 'phone'} onClick={() => setView('phone')}><Smartphone size={16} /> Phone</button>
           <button className={button} aria-pressed={view === 'code'} onClick={() => setView('code')}><Code2 size={16} /> Code</button>
-          {project && view !== 'code' && <button className={button} onClick={() => void capture()} disabled={working}>
+          <button className={button} aria-pressed={view === 'terminal'} onClick={() => setView('terminal')}>Terminal</button>
+          {project && (view === 'desktop' || view === 'phone') && <button className={button} onClick={() => void capture()} disabled={working}>
             <Camera size={16} /> {capturing ? 'Capturing…' : 'Take screenshot'}
           </button>}
-          {project && view !== 'code' && <button className={button} aria-pressed={selecting} disabled={working}
+          {project && (view === 'desktop' || view === 'phone') && <button className={button} aria-pressed={selecting} disabled={working}
             onClick={() => setSelecting(value => !value)}>{selecting ? 'Cancel selection' : 'Select in preview'}</button>}
           {project && <button className={button} onClick={() => void downloadProject()}><Download size={16} /> Download project</button>}
           {project && <span className="ml-auto text-xs text-slate-600">{project.revision ? `Revision ${project.revision}` : 'Starter'}</span>}
@@ -398,11 +432,32 @@ export default function FeatureBuilderPage({ signedIn, onLogin }: { signedIn: bo
             </button>}
           {project.publicRelease && <button className={button} disabled={working} onClick={() => void manage({ action: 'unpublish' })}>Unpublish</button>}
           {project.publicRelease && <button className={button} disabled={working} onClick={() => void checkRelease()}>Check release in browser</button>}
+          {project.monitor && <p className="basis-full text-sm text-slate-700">
+            Scheduled phone check · {new Date(project.monitor.checkedAt).toLocaleString()} · {project.monitor.checks
+              ? project.monitor.checks.rendered && !project.monitor.checks.runtimeErrors && !project.monitor.checks.horizontalOverflow ? 'Passed' : 'Issues found'
+              : 'Browser unavailable'}
+          </p>}
           {releaseReport && <p role="status" className="basis-full text-sm text-slate-700">{releaseReport}</p>}
           <p className="basis-full text-xs text-slate-600">Anyone with the public link can open the published revision.</p>
         </div>}
         {previewError && <p role="alert" className="break-words px-3 pt-3 text-sm text-red-700">Preview error · {previewError}</p>}
         {!project ? <p className="p-6 text-sm text-slate-600">{error ? 'Preview unavailable.' : 'Loading project…'}</p>
+          : view === 'terminal' ? <div className="space-y-3 p-4">
+            <p className="text-sm text-slate-600">Run commands against a temporary copy of revision {project.revision}. Terminal files expire and are separate from saved app revisions.</p>
+            <div className="flex flex-wrap gap-2">
+              <button className={button} disabled={working} onClick={() => void runTerminal('run', 'npm install --ignore-scripts')}>Install dependencies</button>
+              <button className={button} disabled={working} onClick={() => void runTerminal('run', 'npm run build')}>Run build</button>
+              <button className={button} disabled={working} onClick={() => void runTerminal('reset')}>Reset terminal</button>
+            </div>
+            <pre aria-label="Terminal output" className="min-h-40 max-h-96 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-slate-950 p-3 text-sm text-slate-100">
+              {terminalLog || 'Terminal output appears here.'}
+            </pre>
+            <form className="flex flex-wrap gap-2" onSubmit={event => { event.preventDefault(); void runTerminal('run'); }}>
+              <input aria-label="Terminal command" className="min-w-0 flex-1 rounded-lg border px-3 font-mono text-sm" maxLength={2000}
+                value={command} onChange={event => setCommand(event.target.value)} placeholder="npm run build" disabled={working} />
+              <button className={primary} disabled={working || !command.trim()}>{terminalBusy ? 'Running…' : 'Run command'}</button>
+            </form>
+          </div>
           : view === 'code' ? <div className="p-3">
             <div className="flex flex-wrap gap-2">
               {(['App.jsx', 'styles.css'] as const).map(name => <button className={button} key={name} aria-pressed={file === name} onClick={() => setFile(name)}>{name}</button>)}
