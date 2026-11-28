@@ -4,7 +4,7 @@ export type BuilderProgress = { id: string; label: string; state: 'running' | 'd
 
 export async function requestBuilderRun<T>(
   endpoint: string,
-  body: { prompt: string; revision?: number },
+  body: { prompt: string; revision?: number; mode?: 'quick' | 'standard' },
   onProgress: (event: BuilderProgress) => void,
   signal?: AbortSignal,
 ): Promise<T> {

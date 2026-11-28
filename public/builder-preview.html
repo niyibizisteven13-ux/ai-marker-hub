@@ -12,7 +12,28 @@ window.addEventListener('message', function receive(event) {
   if (event.source !== window.parent || event.data?.type !== 'bwenge:builder-preview' || typeof event.data.html !== 'string') return;
   window.removeEventListener('message', receive);
   document.open();
-  document.write(event.data.html);
+  const instrument = `<script>(function () {
+    let selecting = false;
+    const send = (type, detail) => parent.postMessage({ type, detail }, '*');
+    window.addEventListener('message', event => {
+      if (event.source === parent && event.data?.type === 'bwenge:select-mode') selecting = event.data.enabled === true;
+    });
+    window.addEventListener('error', event => send('bwenge:preview-error', String(event.message).slice(0, 300)));
+    window.addEventListener('unhandledrejection', event => send('bwenge:preview-error', String(event.reason).slice(0, 300)));
+    document.addEventListener('click', event => {
+      if (!selecting || !(event.target instanceof Element)) return;
+      const element = event.target.closest('button, a, input, select, textarea, label, h1, h2, h3, section, article') || event.target;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      selecting = false;
+      send('bwenge:selection', {
+        tag: element.localName.slice(0, 32),
+        text: (element.getAttribute('aria-label') || element.textContent || element.getAttribute('placeholder') || '').trim().replace(/\\s+/g, ' ').slice(0, 140),
+      });
+    }, true);
+  })();<\/script>`;
+  const content = event.data.html.replace('</head>', () => instrument + '</head>');
+  document.write(content);
   document.close();
 });
 </script>

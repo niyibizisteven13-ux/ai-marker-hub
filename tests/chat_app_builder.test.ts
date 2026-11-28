@@ -36,3 +36,29 @@ test('app build returns streaming progress before the saved revision', async () 
   const incomplete = new Response('', { headers: { 'content-type': 'application/x-ndjson' } });
   await assert.rejects(readBuilderRun(incomplete, () => undefined), /before saving/);
 });
+
+test('revision history captures prior source and keeps workspace release pinned', async () => {
+  const { nextRevision, revisionStateSchema, snapshot } = await import('../server/services/featureRevisions.js');
+  const files = { 'App.jsx': 'old source', 'styles.css': 'old styles' };
+  const initial = revisionStateSchema.parse({ revision: 5, files, summary: 'Previous build' });
+  const released = { ...initial, published: snapshot(initial) };
+  const updated = nextRevision(released, { ...files, 'App.jsx': 'new source' }, 'Next build');
+  assert.equal(updated.revision, 6);
+  assert.deepEqual(updated.history, [snapshot(initial)]);
+  assert.deepEqual(updated.published, snapshot(initial));
+  let latest = updated;
+  for (let i = 0; i < 15; i++) latest = nextRevision(latest, latest.files, 'Another edit');
+  assert.equal(latest.history.length, 12);
+  assert.equal(latest.published?.revision, 5);
+  assert.equal(revisionStateSchema.safeParse(latest).success, true);
+});
+
+test('browser check output requires a completed browser report', async () => {
+  const { browserCheckDocument, readBrowserCheck } = await import('../server/services/featureScreenshot.js');
+  const instrumented = browserCheckDocument('<head></head><div id="root"></div>');
+  assert.match(instrumented, /bwenge-browser-check/);
+  assert.deepEqual(readBrowserCheck('<meta name="bwenge-browser-check" content="0,1,2,3">'), {
+    rendered: true, horizontalOverflow: true, runtimeErrors: 2, controlsWithoutNames: 3,
+  });
+  assert.throws(() => readBrowserCheck('<div id="root"></div>'), /did not finish/);
+});

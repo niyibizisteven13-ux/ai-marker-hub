@@ -17,19 +17,55 @@ type Project = {
   preview: string;
   summary: string;
   changed?: string[];
+  history: { revision: number; summary: string }[];
+  publishedRevision: number | null;
+  notes: string;
+  usage?: { inputTokens: number; outputTokens: number };
 };
+
+type PreviewRevision = Pick<Project, 'revision' | 'preview'>;
+type Selection = { tag: string; text: string };
+type RevisionAction =
+  | { action: 'edit'; files: Project['files'] }
+  | { action: 'restore'; target: number }
+  | { action: 'release'; target?: number }
+  | { action: 'notes'; notes: string };
 
 const button = 'inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-slate-300 px-3 text-sm font-medium disabled:opacity-50';
 const primary = 'inline-flex min-h-11 items-center justify-center rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50';
 
-function Preview({ html, phone }: { html: string; phone: boolean }) {
+function Preview({ html, phone, selecting, onSelect, onError }: {
+  html: string;
+  phone: boolean;
+  selecting?: boolean;
+  onSelect?: (selection: Selection) => void;
+  onError?: (message: string) => void;
+}) {
   const sent = useRef(false);
-  return <iframe src="/builder-preview.html" title="App preview" sandbox="allow-scripts"
+  const iframe = useRef<HTMLIFrameElement>(null);
+  useEffect(() => {
+    function receive(event: MessageEvent) {
+      if (event.source !== iframe.current?.contentWindow || event.origin !== 'null') return;
+      const { type, detail } = event.data ?? {};
+      if (type === 'bwenge:preview-error' && typeof detail === 'string') onError?.(detail.slice(0, 300));
+      if (type === 'bwenge:selection' && selecting && typeof detail?.tag === 'string' && typeof detail?.text === 'string') {
+        onSelect?.({ tag: detail.tag.slice(0, 32), text: detail.text.slice(0, 140) });
+      }
+    }
+    window.addEventListener('message', receive);
+    return () => window.removeEventListener('message', receive);
+  }, [selecting, onSelect, onError]);
+  useEffect(() => {
+    iframe.current?.contentWindow?.postMessage({ type: 'bwenge:select-mode', enabled: selecting }, '*');
+  }, [selecting]);
+
+  return <iframe ref={iframe} src="/builder-preview.html" title="App preview" sandbox="allow-scripts"
     onLoad={event => {
       const frame = event.currentTarget.contentWindow;
       if (sent.current || !frame) return;
       sent.current = true;
       frame.postMessage({ type: 'bwenge:builder-preview', html }, '*');
+      frame.postMessage({ type: 'bwenge:select-mode', enabled: !!selecting }, '*');
     }}
     className={`mx-auto block h-[65vh] w-full rounded-xl bg-white ${phone ? 'max-w-[390px]' : ''}`} />;
 }
@@ -41,14 +77,26 @@ export default function FeatureBuilderPage({ signedIn, onLogin }: { signedIn: bo
   });
   const [project, setProject] = useState<Project | null>(null);
   const [prompt, setPrompt] = useState('');
+  const [mode, setMode] = useState<'quick' | 'standard'>('standard');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<BuilderProgress[]>([]);
   const [capturing, setCapturing] = useState(false);
-  const [screenshot, setScreenshot] = useState<{ url: string; viewport: 'desktop' | 'phone'; revision: number }>();
+  const [screenshots, setScreenshots] = useState<{ url: string; viewport: 'desktop' | 'phone'; revision: number }[]>([]);
+  const screenshotUrls = useRef(new Set<string>());
   const [reload, setReload] = useState(0);
   const [view, setView] = useState<'desktop' | 'phone' | 'code'>('desktop');
   const [file, setFile] = useState<keyof Project['files']>('App.jsx');
+  const [source, setSource] = useState<Project['files']>();
+  const [notes, setNotes] = useState('');
+  const [mutation, setMutation] = useState(false);
+  const [comparison, setComparison] = useState<PreviewRevision>();
+  const [compareTarget, setCompareTarget] = useState('');
+  const [selecting, setSelecting] = useState(false);
+  const [selection, setSelection] = useState<Selection>();
+  const [previewError, setPreviewError] = useState('');
+  const [notice, setNotice] = useState('');
+  const working = busy || capturing || mutation;
   const projectParam = new URLSearchParams(window.location.search).get('project');
   const endpoint = featureBuilderEndpoint(workspace, isChatAppProject(projectParam) ? projectParam : undefined);
   const example = workspaces[workspace].example;
@@ -57,7 +105,12 @@ export default function FeatureBuilderPage({ signedIn, onLogin }: { signedIn: bo
     if (!signedIn) return;
     const controller = new AbortController();
     setProject(null);
-    setScreenshot(undefined);
+    setComparison(undefined);
+    setCompareTarget('');
+    setSelection(undefined);
+    setSelecting(false);
+    setNotice('');
+    setScreenshots([]);
     setProgress([]);
     setError('');
     void (async () => {
@@ -65,7 +118,7 @@ export default function FeatureBuilderPage({ signedIn, onLogin }: { signedIn: bo
         const response = await authFetch(endpoint, { signal: controller.signal });
         if (!response.ok) throw new Error('Could not load this project.');
         const result: Project = await response.json();
-        if (!controller.signal.aborted) setProject(result);
+        if (!controller.signal.aborted) updateProject(result);
       } catch {
         if (!controller.signal.aborted) setError('Could not load this project. Try reloading it.');
       }
@@ -73,42 +126,105 @@ export default function FeatureBuilderPage({ signedIn, onLogin }: { signedIn: bo
     return () => controller.abort();
   }, [endpoint, reload, signedIn]);
 
-  useEffect(() => () => { if (screenshot) URL.revokeObjectURL(screenshot.url); }, [screenshot]);
+  useEffect(() => {
+    const visible = new Set(screenshots.map(item => item.url));
+    for (const url of screenshotUrls.current) {
+      if (visible.has(url)) continue;
+      URL.revokeObjectURL(url);
+      screenshotUrls.current.delete(url);
+    }
+  }, [screenshots]);
+  useEffect(() => {
+    const urls = screenshotUrls.current;
+    return () => { for (const url of urls) URL.revokeObjectURL(url); urls.clear(); };
+  }, []);
 
-  async function capture() {
-    if (!project || busy || capturing) return;
-    const viewport = view === 'phone' ? 'phone' : 'desktop';
+  function updateProject(result: Project) {
+    if (project?.revision !== result.revision) setPreviewError('');
+    setProject(result);
+    setSource(result.files);
+    setNotes(result.notes);
+  }
+
+  function revisionUrl(path: string) {
     const url = new URL(endpoint, window.location.origin);
+    return `${url.pathname}/${path}${url.search}`;
+  }
+
+  async function manage(action: RevisionAction) {
+    if (!project || working) return;
+    setMutation(true);
+    setNotice('');
+    setError('');
+    try {
+      const response = await authFetch(revisionUrl('revisions'), {
+        method: 'POST', body: JSON.stringify({ ...action, revision: project.revision }),
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(result?.error || 'Could not save the project.');
+      updateProject(result);
+      if (action.action === 'release' && compareTarget === 'release') {
+        setCompareTarget('');
+        setComparison(undefined);
+      }
+      setNotice(action.action === 'release' ? 'Release saved in this workspace.' :
+        action.action === 'restore' ? 'Restored as a new working revision.' : 'Saved.');
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save the project.'); }
+    finally { setMutation(false); }
+  }
+
+  async function compare(revision: string) {
+    setCompareTarget(revision);
+    setComparison(undefined);
+    if (!revision) return;
+    setMutation(true);
+    setError('');
+    try {
+      const response = await authFetch(revisionUrl(`revision/${revision}`));
+      if (!response.ok) throw new Error('Could not load this revision.');
+      setComparison(await response.json());
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not load this revision.'); }
+    finally { setMutation(false); }
+  }
+
+  async function capture(revision = project?.revision) {
+    if (revision === undefined || working) return;
+    const viewport: 'phone' | 'desktop' = view === 'phone' ? 'phone' : 'desktop';
     setCapturing(true);
     setError('');
     try {
-      const response = await authFetch(`${url.pathname}/screenshot${url.search}`, {
-        method: 'POST', body: JSON.stringify({ viewport, revision: project.revision }),
+      const response = await authFetch(revisionUrl('screenshot'), {
+        method: 'POST', body: JSON.stringify({ viewport, revision }),
       });
       if (!response.ok) {
         const problem = await response.json().catch(() => null);
         throw new Error(problem?.error || 'Could not capture preview.');
       }
-      setScreenshot({ url: URL.createObjectURL(await response.blob()), viewport, revision: project.revision });
+      const url = URL.createObjectURL(await response.blob());
+      screenshotUrls.current.add(url);
+      setScreenshots(current => [...current.filter(item => item.revision !== revision || item.viewport !== viewport), { url, viewport, revision }].slice(-4));
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not capture preview.'); }
     finally { setCapturing(false); }
   }
 
   async function requestBuild(event: FormEvent) {
     event.preventDefault();
-    if (!project || !prompt.trim() || busy || capturing) return;
+    if (!project || !prompt.trim() || working) return;
     setBusy(true);
     setProgress([]);
-    setScreenshot(undefined);
+    setScreenshots([]);
     setError('');
     try {
-      const result = await requestBuilderRun<Project>(endpoint, { prompt, revision: project.revision }, event => {
+      const request = selection ? `Selected preview element: ${JSON.stringify(selection)}\n\n${prompt}`.slice(0, 4_000) : prompt;
+      const result = await requestBuilderRun<Project>(endpoint, { prompt: request, revision: project.revision, mode }, event => {
         setProgress(current => {
           const prior = current.find(step => step.id === event.id);
           return prior ? current.map(step => step === prior ? { ...event, detail: event.detail ?? step.detail } : step) : [...current, event];
         });
       });
-      setProject(result);
+      updateProject(result);
+      setSelection(undefined);
+      setSelecting(false);
       setPrompt('');
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'The build could not finish.'); }
     finally { setBusy(false); }
@@ -153,7 +269,7 @@ export default function FeatureBuilderPage({ signedIn, onLogin }: { signedIn: bo
       <div className="mx-auto flex max-w-screen-2xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
         <a href="/" className="inline-flex items-center gap-2 text-sm font-medium"><ArrowLeft size={16} /> Bwenge</a>
         <h1 className="text-lg font-semibold">App Builder</h1>
-        {signedIn && <select aria-label="Workspace" value={workspace} disabled={busy || capturing}
+        {signedIn && <select aria-label="Workspace" value={workspace} disabled={working}
           onChange={event => { setProject(null); setWorkspace(event.target.value as Workspace); setPrompt(''); }}
           className="min-h-10 rounded-lg border border-slate-300 bg-white px-2 text-sm">
           {Object.entries(workspaces).map(([key, option]) => <option key={key} value={key}>{option.label}</option>)}
@@ -172,11 +288,22 @@ export default function FeatureBuilderPage({ signedIn, onLogin }: { signedIn: bo
           <textarea id="feature-prompt" rows={5} maxLength={4000} value={prompt} disabled={busy}
             onChange={event => setPrompt(event.target.value)} placeholder={example}
             className="w-full resize-y rounded-lg border border-slate-300 p-3 text-sm focus:outline-indigo-600" />
+          {selection && <div className="flex items-center gap-2 text-sm">
+            <span className="min-w-0 break-words">Selected {selection.tag} {selection.text && `· ${selection.text}`}</span>
+            <button className={button} type="button" onClick={() => setSelection(undefined)}>Clear</button>
+          </div>}
           <button type="button" className="text-left text-sm text-indigo-700 underline" disabled={busy} onClick={() => setPrompt(example)}>Use example</button>
-          <button className={`${primary} w-full`} disabled={busy || capturing || !project || !prompt.trim()}>{busy ? 'Writing and checking code…' : 'Build feature'}</button>
+          <label className="flex items-center justify-between gap-2 text-sm">
+            Build mode
+            <select className={button} value={mode} disabled={working} onChange={event => setMode(event.target.value === 'quick' ? 'quick' : 'standard')}>
+              <option value="standard">Standard</option>
+              <option value="quick">Quick edit</option>
+            </select>
+          </label>
+          <button className={`${primary} w-full`} disabled={working || !project || !prompt.trim()}>{busy ? 'Writing and checking code…' : 'Build feature'}</button>
         </form>
         {error && <div className="mt-4 space-y-2 text-sm"><p role="alert" className="text-red-700">{error}</p>
-          <button className={button} onClick={() => setReload(value => value + 1)}>Reload project</button></div>}
+          <button className={button} disabled={working} onClick={() => setReload(value => value + 1)}>Reload project</button></div>}
         {progress.length > 0 && <ol aria-label="Build progress" aria-live="polite" className="mt-4 space-y-2 border-t border-slate-200 pt-4 text-sm">
           {progress.map(step => <li key={step.id} className="flex items-start justify-between gap-2">
             <span>{step.label}{step.detail && <code className="ml-1 break-all text-xs text-slate-500">{step.detail}</code>}</span>
@@ -185,6 +312,17 @@ export default function FeatureBuilderPage({ signedIn, onLogin }: { signedIn: bo
             </span>
           </li>)}
         </ol>}
+        {notice && <p role="status" className="mt-3 text-sm text-emerald-800">{notice}</p>}
+        {project?.usage && <p className="mt-3 text-sm text-slate-600">
+          Last build used {project.usage.inputTokens.toLocaleString()} input tokens and {project.usage.outputTokens.toLocaleString()} output tokens.
+        </p>}
+        {project && <details className="mt-5 border-t border-slate-200 pt-4">
+          <summary className="cursor-pointer font-semibold">Project preferences</summary>
+          <label className="mt-2 block text-sm text-slate-600" htmlFor="builder-notes">Brand, layout, and decisions the agent should remember</label>
+          <textarea id="builder-notes" className="my-2 w-full rounded-lg border border-slate-300 p-2 text-sm"
+            rows={4} maxLength={2000} value={notes} onChange={event => setNotes(event.target.value)} disabled={working} />
+          <button className={button} disabled={working || notes === project.notes} onClick={() => void manage({ action: 'notes', notes })}>Save preferences</button>
+        </details>}
         {project?.summary && <div className="mt-5 border-t border-slate-200 pt-4">
           <h2 className="font-semibold">Build summary</h2>
           <p className="mt-2 whitespace-pre-wrap break-words text-sm text-slate-700">{project.summary}</p>
@@ -196,29 +334,64 @@ export default function FeatureBuilderPage({ signedIn, onLogin }: { signedIn: bo
           <button className={button} aria-pressed={view === 'desktop'} onClick={() => setView('desktop')}><Monitor size={16} /> Desktop</button>
           <button className={button} aria-pressed={view === 'phone'} onClick={() => setView('phone')}><Smartphone size={16} /> Phone</button>
           <button className={button} aria-pressed={view === 'code'} onClick={() => setView('code')}><Code2 size={16} /> Code</button>
-          {project && view !== 'code' && <button className={button} onClick={() => void capture()} disabled={busy || capturing}>
+          {project && view !== 'code' && <button className={button} onClick={() => void capture()} disabled={working}>
             <Camera size={16} /> {capturing ? 'Capturing…' : 'Take screenshot'}
           </button>}
+          {project && view !== 'code' && <button className={button} aria-pressed={selecting} disabled={working}
+            onClick={() => setSelecting(value => !value)}>{selecting ? 'Cancel selection' : 'Select in preview'}</button>}
           {project && <button className={button} onClick={() => void downloadProject()}><Download size={16} /> Download project</button>}
           {project && <span className="ml-auto text-xs text-slate-600">{project.revision ? `Revision ${project.revision}` : 'Starter'}</span>}
         </div>
+        {project && <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 p-3">
+          <label className="text-sm" htmlFor="builder-revision">Compare with</label>
+          <select id="builder-revision" value={compareTarget} disabled={working} className={button} onChange={event => void compare(event.target.value)}>
+            <option value="">Current draft only</option>
+            {project.publishedRevision !== null && <option value="release">Workspace release · {project.publishedRevision}</option>}
+            {project.history.map(item => <option key={item.revision} value={item.revision}>Revision {item.revision}</option>)}
+          </select>
+          {comparison && comparison.revision !== project.revision && <button className={button} disabled={working}
+            onClick={() => void manage({ action: 'restore', target: comparison.revision })}>Restore revision {comparison.revision}</button>}
+          {comparison && project.publishedRevision !== null && comparison.revision !== project.publishedRevision &&
+            project.history.some(item => item.revision === comparison.revision) && <button className={button} disabled={working}
+              onClick={() => void manage({ action: 'release', target: comparison.revision })}>Roll back workspace release</button>}
+          <button className={button} disabled={working || project.publishedRevision === project.revision || !!previewError}
+            onClick={() => void manage({ action: 'release' })}>Save workspace release</button>
+        </div>}
+        {previewError && <p role="alert" className="break-words px-3 pt-3 text-sm text-red-700">Preview error · {previewError}</p>}
         {!project ? <p className="p-6 text-sm text-slate-600">{error ? 'Preview unavailable.' : 'Loading project…'}</p>
           : view === 'code' ? <div className="p-3">
             <div className="flex flex-wrap gap-2">
               {(['App.jsx', 'styles.css'] as const).map(name => <button className={button} key={name} aria-pressed={file === name} onClick={() => setFile(name)}>{name}</button>)}
               <button className={button} onClick={download}><Download size={16} /> Download file</button>
             </div>
-            <pre className="mt-3 max-h-[65vh] overflow-auto rounded-xl bg-slate-950 p-4 text-xs text-slate-100"><code>{project.files[file]}</code></pre>
+            <textarea aria-label={`Edit ${file}`} spellCheck={false} maxLength={24000} rows={20} value={source?.[file] ?? project.files[file]}
+              disabled={working} onChange={event => setSource({ ...(source ?? project.files), [file]: event.target.value })}
+              className="my-3 w-full rounded-xl bg-slate-950 p-4 font-mono text-xs text-slate-100" />
+            <button className={primary} disabled={working || !source || (source['App.jsx'] === project.files['App.jsx'] && source['styles.css'] === project.files['styles.css'])}
+              onClick={() => source && void manage({ action: 'edit', files: source })}>Compile and save</button>
           </div> : <div className="bg-slate-200 p-3">
-            <Preview key={`${workspace}:${project.revision}:${reload}`} html={project.preview} phone={view === 'phone'} />
+            <div className={`grid gap-3 ${comparison ? 'xl:grid-cols-2' : ''}`}>
+              <div className="min-w-0">
+                {comparison && <p className="mb-2 text-sm font-medium">Current revision {project.revision}</p>}
+                <Preview key={`${workspace}:${project.revision}:${reload}`} html={project.preview} phone={view === 'phone'}
+                  selecting={selecting} onSelect={element => { setSelection(element); setSelecting(false); }} onError={setPreviewError} />
+              </div>
+              {comparison && <div className="min-w-0">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <p className="text-sm font-medium">Revision {comparison.revision}</p>
+                  <button className={button} disabled={working} onClick={() => void capture(comparison.revision)}>Capture comparison</button>
+                </div>
+                <Preview key={comparison.revision} html={comparison.preview} phone={view === 'phone'} />
+              </div>}
+            </div>
           </div>}
-        {screenshot && <figure className="border-t border-slate-200 p-4">
+        {screenshots.map(screenshot => <figure key={screenshot.url} className="border-t border-slate-200 p-4">
           <figcaption className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm">
             <span>{screenshot.viewport === 'phone' ? 'Phone' : 'Desktop'} screenshot · Revision {screenshot.revision}</span>
             <a className={button} href={screenshot.url} download={`bwenge-${screenshot.viewport}-r${screenshot.revision}.png`}>Download PNG</a>
           </figcaption>
           <img src={screenshot.url} alt="Screenshot of the saved app preview" className="mx-auto max-h-[65vh] max-w-full rounded border border-slate-200 object-contain" />
-        </figure>}
+        </figure>)}
       </section>
     </main>}
   </div>;
