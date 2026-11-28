@@ -1,7 +1,9 @@
+import { randomBytes } from 'node:crypto';
+import { publicReleaseKey, publicReleaseSchema } from '../services/featurePublicRelease.js';
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { SharedRateLimitStore } from '../services/cache/redis.js';
-import { renderFeatureScreenshot, screenshotsConfigured } from '../services/featureScreenshot.js';
+import { checkFeatureBrowser, renderFeatureScreenshot, screenshotsConfigured } from '../services/featureScreenshot.js';
 import { z } from 'zod';
 import { isChatAppProject } from '../../shared/chatAppBuilder.js';
 import { prisma } from '../db.js';
@@ -41,16 +43,16 @@ function loadState(value: unknown, kind: Starter): RevisionState {
   return { revision: 0, files: starterFiles(kind), summary: '', history: [], notes: '' };
 }
 
-async function saveState(key: string, userId: string, previous: Prisma.JsonValue | undefined, value: RevisionState) {
+async function saveState(key: string, userId: string, previous: Prisma.JsonValue | undefined, value: RevisionState, db: Pick<typeof prisma, 'appSetting'> = prisma) {
   if (previous !== undefined) {
-    const written = await prisma.appSetting.updateMany({
+    const written = await db.appSetting.updateMany({
       where: { key, value: { equals: previous as Prisma.InputJsonValue } },
       data: { value, updatedBy: userId },
     });
     return written.count === 1;
   }
   try {
-    await prisma.appSetting.create({ data: { key, value, updatedBy: userId } });
+    await db.appSetting.create({ data: { key, value, updatedBy: userId } });
     return true;
   } catch (error) {
     if ((error as { code?: string })?.code === 'P2002') return false;
@@ -103,11 +105,38 @@ router.post('/:kind/screenshot', screenshotLimit, async (req, res) => {
   } catch { res.status(502).json({ error: 'The preview could not be captured.' }); }
 });
 
+router.post('/:kind/check-release', screenshotLimit, async (req, res, next) => {
+  const kind = kindSchema.safeParse(req.params.kind);
+  const viewport = z.enum(['phone', 'desktop']).safeParse(req.body?.viewport);
+  const userId = (req as any).user?.userId;
+  if (!userId) return res.sendStatus(401);
+  if (!kind.success || !viewport.success) return res.sendStatus(400);
+  const key = projectKey(userId, kind.data, req.query.project);
+  if (!key) return res.sendStatus(400);
+  if (!screenshotsConfigured()) return res.status(503).json({ error: 'The browser check environment is not configured.' });
+  try {
+    const row = await prisma.appSetting.findUnique({ where: { key } });
+    const release = loadState(row?.value, kind.data).publicRelease;
+    if (!release) return res.status(404).json({ error: 'Publish an app before checking its release.' });
+    const artifact = await prisma.appSetting.findUnique({ where: { key: publicReleaseKey(release.id) } });
+    const parsed = publicReleaseSchema.safeParse(artifact?.value);
+    if (!parsed.success || parsed.data.revision !== release.source.revision) {
+      return res.status(409).json({ error: 'The release changed. Try the check again.' });
+    }
+    try {
+      const report = await checkFeatureBrowser(parsed.data.html, viewport.data);
+      res.json({ revision: release.source.revision, viewport: viewport.data, ...report });
+    } catch { res.status(502).json({ error: 'The release browser check could not finish.' }); }
+  } catch (error) { next(error); }
+});
+
 const revisionNumber = z.number().int().nonnegative();
 const actionSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('edit'), revision: revisionNumber, files: projectFilesSchema }).strict(),
   z.object({ action: z.literal('restore'), revision: revisionNumber, target: revisionNumber }).strict(),
   z.object({ action: z.literal('release'), revision: revisionNumber, target: revisionNumber.optional() }).strict(),
+  z.object({ action: z.literal('publish'), revision: revisionNumber, target: revisionNumber }).strict(),
+  z.object({ action: z.literal('unpublish'), revision: revisionNumber }).strict(),
   z.object({ action: z.literal('notes'), revision: revisionNumber, notes: z.string().trim().max(2_000) }).strict(),
 ]);
 
@@ -145,6 +174,7 @@ router.post('/:kind/revisions', async (req, res, next) => {
     const state = loadState(row?.value, kind.data);
     if (state.revision !== action.revision) return conflict();
     let value = state;
+    let publicArtifact: z.infer<typeof publicReleaseSchema> | undefined;
     switch (action.action) {
       case 'edit':
         value = nextRevision(state, action.files, 'Edited source in the workspace.');
@@ -162,6 +192,29 @@ router.post('/:kind/revisions', async (req, res, next) => {
         value = { ...state, published: snapshot(target) };
         break;
       }
+      case 'publish': {
+        const target = [state, ...state.history, state.published, state.publicRelease?.previous].find(item => item?.revision === action.target);
+        if (!target?.revision) return res.status(404).json({ error: 'Choose a saved revision to publish.' });
+        if (state.publicRelease?.source.revision === target.revision) return res.json(await projectResponse(state));
+        const artifact = await compileFeaturePreview(target.files).catch(() => undefined);
+        const validated = publicReleaseSchema.safeParse({ revision: target.revision, html: artifact });
+        if (!validated.success) return res.status(422).json({ error: 'That revision could not be compiled for publishing.' });
+        publicArtifact = validated.data;
+        value = {
+          ...state,
+          publicRelease: {
+            id: state.publicRelease?.id ?? randomBytes(16).toString('hex'),
+            source: snapshot(target),
+            ...(state.publicRelease ? { previous: state.publicRelease.source } : {}),
+          },
+        };
+        break;
+      }
+      case 'unpublish': {
+        const { publicRelease: _release, ...unpublished } = state;
+        value = unpublished;
+        break;
+      }
       case 'notes':
         value = { ...state, notes: action.notes };
         break;
@@ -174,7 +227,22 @@ router.post('/:kind/revisions', async (req, res, next) => {
       }
     }
     catch { return res.status(422).json({ error: 'Compilation failed. Check your React and CSS source.' }); }
-    if (!await saveState(key, userId, row?.value, value)) return conflict();
+    if (action.action === 'publish' || action.action === 'unpublish') {
+      const saved = await prisma.$transaction(async db => {
+        if (!await saveState(key, userId, row?.value, value, db)) return false;
+        if (action.action === 'publish' && value.publicRelease && publicArtifact) {
+          const artifactKey = publicReleaseKey(value.publicRelease.id);
+          await db.appSetting.upsert({
+            where: { key: artifactKey }, create: { key: artifactKey, value: publicArtifact, updatedBy: userId },
+            update: { value: publicArtifact, updatedBy: userId },
+          });
+        } else if (state.publicRelease) {
+          await db.appSetting.deleteMany({ where: { key: publicReleaseKey(state.publicRelease.id) } });
+        }
+        return true;
+      });
+      if (!saved) return conflict();
+    } else if (!await saveState(key, userId, row?.value, value)) return conflict();
     res.json(result);
   } catch (error) { next(error); }
 });
