@@ -1,4 +1,4 @@
-import { ArrowRight, ClipboardList, Database, GraduationCap, Store } from 'lucide-react';
+import { ArrowRight, ClipboardList, Code2, Database, GraduationCap, Store } from 'lucide-react';
 
 interface StarterCardsProps {
   onOpenPublicLibrary: () => void;
@@ -29,6 +29,20 @@ export function StarterCards({
     <section aria-labelledby="home-shortcuts" className="w-full max-w-xl text-left">
       <h2 id="home-shortcuts" className="mb-2.5 text-xs font-semibold text-[var(--app-muted)]">Quick access</h2>
       <div className="grid grid-cols-2 gap-2.5 min-[420px]:gap-3">
+        <a
+          href="/builder?workspace=custom"
+          className={`${cardClass} ${interactiveClass} col-span-2 flex items-center gap-3`}
+        >
+          <span className={`${iconClass} bg-[var(--brand)]/15 text-[var(--app-text)]`}>
+            <Code2 size={18} aria-hidden="true" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className={`block ${titleClass}`}>Build an app</span>
+            <span className={`block ${detailClass}`}>Describe your idea and preview it on mobile or desktop.</span>
+          </span>
+          <ArrowRight size={16} aria-hidden="true" className="shrink-0 text-[var(--app-muted)]" />
+        </a>
+
         <button type="button" onClick={onOpenPublicLibrary} className={tileButtonClass}>
           <span className="mb-2 flex items-start justify-between gap-2">
             <span className={`${iconClass} bg-emerald-500/15 text-emerald-600 dark:text-emerald-300`}><Database size={17} aria-hidden="true" /></span>
