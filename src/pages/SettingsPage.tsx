@@ -36,8 +36,8 @@ const SECTIONS = [
 
 export default function SettingsPage({ user, onUpdateUser, onLogout, onBack }: SettingsPageProps) {
   const isMobile = useIsMobile();
-  const [activeSection, setActiveSection] = useState<string>('general');
-  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
+  const [activeSection, setActiveSection] = useState<string>(() => new URLSearchParams(window.location.search).get('tab') === 'connections' ? 'connections' : 'general');
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(() => new URLSearchParams(window.location.search).get('tab') === 'connections');
   const [isDirty, setIsDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const saveActionRef = useRef<(() => Promise<void>) | null>(null);

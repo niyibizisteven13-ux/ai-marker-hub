@@ -114,8 +114,10 @@ self.addEventListener('fetch', event => {
   if (req.mode === 'navigate' && publicShell(path)) {
     const canonical = url.origin + (businessPage.test(path) ? path.replace(/\/$/, '') : path);
     event.respondWith(networkFirst(req, canonical, 'text/html', !url.search));
-  } else if ((businessData.test(path) && !url.search) || businessIcon.test(path)) {
-    event.respondWith(networkFirst(req, url.href, businessData.test(path) ? 'application/json' : 'image/png'));
+  } else if (businessData.test(path) && (!url.search || url.search === '?refresh=1')) {
+    event.respondWith(networkFirst(req, url.origin + path, 'application/json'));
+  } else if (businessIcon.test(path)) {
+    event.respondWith(networkFirst(req, url.href, 'image/png'));
   } else if (asset.test(path) && !url.search && event.clientId) {
     event.respondWith(staticAsset(url.href));
   }
